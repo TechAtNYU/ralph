@@ -1,0 +1,8 @@
+{
+	"name": "@ralph/config",
+	"private": true,
+	"type": "module",
+	"exports": {
+		"./tsconfig": "./tsconfig.base.json"
+	}
+}
