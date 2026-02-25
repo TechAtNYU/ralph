@@ -11,7 +11,8 @@ type ChatMessage = {
 	content: string;
 };
 
-const OPENROUTER_MODEL = "stepfun/step-3.5-flash:free";
+//const OPENROUTER_MODEL = "stepfun/step-3.5-flash:free";
+const OPENROUTER_MODEL = "liquid/lfm-2.5-1.2b-instruct:free";
 
 const runtime = {
 	isShuttingDown: false,
@@ -85,6 +86,24 @@ function App() {
 		}
 	});
 
+	const appendErrorToChat = (message: string) => {
+		setMessages((previous) => {
+			const updated = [...previous];
+			const lastMessage = updated[updated.length - 1];
+
+			if (lastMessage?.role === "assistant" && lastMessage.content.length === 0) {
+				updated.pop();
+			}
+
+			updated.push({
+				role: "system",
+				content: `Error: ${message}`
+			});
+
+			return updated;
+		});
+	};
+
 	const sendMessage = async (rawValue: string) => {
 		if (sendLockRef.current) {
 			return;
@@ -128,6 +147,12 @@ function App() {
 					break;
 				}
 
+				if (chunk.error?.message) {
+					setErrorMessage(chunk.error.message);
+					appendErrorToChat(chunk.error.message);
+					break;
+				}
+
 				const content = chunk.choices[0]?.delta?.content;
 				if (content) {
 					setMessages((previous) => {
@@ -162,20 +187,7 @@ function App() {
 
 			const message = error instanceof Error ? error.message : "Unknown error while calling OpenRouter.";
 			setErrorMessage(message);
-			setMessages((previous) => {
-				if (previous.length === 0) {
-					return previous;
-				}
-
-				const updated = [...previous];
-				const lastMessage = updated[updated.length - 1];
-
-				if (lastMessage?.role === "assistant" && lastMessage.content.length === 0) {
-					updated.pop();
-				}
-
-				return updated;
-			});
+			appendErrorToChat(message);
 		} finally {
 			sendLockRef.current = false;
 			runtime.abortController = null;
