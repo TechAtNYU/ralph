@@ -186,8 +186,8 @@ function App() {
 	};
 
 	return (
-		<box flexDirection="column" flexGrow={1}>
-			<box flexShrink={0} height={1}>
+		<box flexDirection="column" flexGrow={1} width="100%">
+			<box flexShrink={0} height={1} width="100%">
 				<text attributes={TextAttributes.DIM}>
 					Ralph OpenRouter Chat · model: {OPENROUTER_MODEL}
 					{typeof reasoningTokens === "number" ? ` · reasoning tokens: ${reasoningTokens}` : ""}
@@ -198,6 +198,9 @@ function App() {
 			<scrollbox
 				ref={chatScrollRef}
 				flexGrow={1}
+				flexShrink={1}
+				minHeight={0}
+				width="100%"
 				border={true}
 				padding={0}
 				stickyScroll={true}
@@ -220,7 +223,7 @@ function App() {
 				) : null}
 			</scrollbox>
 
-			<box flexShrink={0} height={3} border={true}>
+			<box flexShrink={0} height={3} width="100%" border={true} borderColor="#ffffff">
 				<input
 					focused={true}
 					value={inputValue}
