@@ -17,6 +17,6 @@
 	},
 	"devDependencies": {
 		"@ralph/config": "workspace:*",
-		"@types/bun": "latest"
+		"@types/bun": "1.3.8"
 	}
 }
