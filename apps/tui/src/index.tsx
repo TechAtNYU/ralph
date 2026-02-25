@@ -2,6 +2,7 @@ import { createCliRenderer, TextAttributes } from "@opentui/core";
 import { createRoot, useKeyboard } from "@opentui/react";
 import { OpenRouter } from "@openrouter/sdk";
 import { useMemo, useRef, useState } from "react";
+import type { ScrollBoxRenderable } from "@opentui/core";
 
 type Role = "user" | "assistant" | "system";
 
@@ -48,6 +49,7 @@ function App() {
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [reasoningTokens, setReasoningTokens] = useState<number | null>(null);
 	const sendLockRef = useRef(false);
+	const chatScrollRef = useRef<ScrollBoxRenderable | null>(null);
 
 	const placeholder = useMemo(() => {
 		if (isLoading) {
@@ -64,6 +66,22 @@ function App() {
 
 		if (event.name === "escape") {
 			shutdownApp();
+		}
+
+		if (event.name === "pageup") {
+			chatScrollRef.current?.scrollBy(-1, "viewport");
+		}
+
+		if (event.name === "pagedown") {
+			chatScrollRef.current?.scrollBy(1, "viewport");
+		}
+
+		if (event.ctrl && event.name === "u") {
+			chatScrollRef.current?.scrollBy(-0.5, "viewport");
+		}
+
+		if (event.ctrl && event.name === "d") {
+			chatScrollRef.current?.scrollBy(0.5, "viewport");
 		}
 	});
 
@@ -173,11 +191,12 @@ function App() {
 				<text attributes={TextAttributes.DIM}>
 					Ralph OpenRouter Chat · model: {OPENROUTER_MODEL}
 					{typeof reasoningTokens === "number" ? ` · reasoning tokens: ${reasoningTokens}` : ""}
-					{errorMessage ? ` · error: ${errorMessage}` : ""} · esc / ctrl+c to quit
+					{errorMessage ? ` · error: ${errorMessage}` : ""} · PgUp/PgDn or Ctrl+U/Ctrl+D scroll · esc / ctrl+c quit
 				</text>
 			</box>
 
 			<scrollbox
+				ref={chatScrollRef}
 				flexGrow={1}
 				border={true}
 				padding={0}
