@@ -1,0 +1,7 @@
+{
+	"extends": "@ralph/config/tsconfig",
+	"compilerOptions": {
+		"outDir": "dist"
+	},
+	"include": ["src/**/*"]
+}
