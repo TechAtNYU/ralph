@@ -4,6 +4,7 @@
 	"scripts": {
 		"build": "turbo run build",
 		"dev": "turbo run dev",
+		"dev:docs": "turbo run dev --filter=docs",
 		"lint": "turbo run lint",
 		"check": "biome check",
 		"check:fix": "biome check --fix",
