@@ -1,0 +1,59 @@
+---
+title: Contributing to the Docs
+description: How to add or edit documentation for Ralph.
+icon: Pen
+---
+
+This guide explains how to contribute to the Ralph documentation.
+
+## Docs Structure
+
+Documentation source files live in `apps/docs/content/docs/`. Each MDX file maps to a route:
+
+- `index.mdx` → `/docs`
+- `contributing.mdx` → `/docs/contributing`
+- `guides/foo.mdx` → `/docs/guides/foo`
+
+## Local Development
+
+From the repo root:
+
+```bash
+bun run dev:docs
+```
+
+Or from `apps/docs`:
+
+```bash
+bun run dev
+```
+
+The docs site will be available at `http://localhost:3000` (or the port shown in the terminal).
+
+## MDX Format
+
+Each doc page uses frontmatter and Markdown (or MDX):
+
+```mdx
+---
+title: Page Title
+description: Brief description for search and previews
+icon: Rocket
+---
+
+Your content here. You can use **Markdown** and Fumadocs components like `Card` and `Cards` for richer layouts.
+```
+
+**Frontmatter fields:**
+
+- `title` (required) – Page title
+- `description` (optional) – Short description
+- `icon` (optional) – Lucide icon name (e.g. Rocket, Book, Pen)
+
+## GitHub Workflow
+
+1. Fork the [Ralph repo](https://github.com/TechAtNYU/ralph) or create a new branch
+2. Edit files in `apps/docs/content/docs/`
+3. Open a pull request
+
+You can edit docs directly on GitHub for small changes, or clone the repo for larger edits.
