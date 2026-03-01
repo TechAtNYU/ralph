@@ -4,16 +4,13 @@
 	"private": true,
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts",
-		"./server": "./src/server.ts"
+		".": "./src/index.ts"
 	},
 	"scripts": {
-		"dev": "bun run --watch src/server.ts",
 		"check:types": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@opencode-ai/sdk": "^1.2.10",
-		"hono": "^4.7.13"
+		"@opencode-ai/sdk": "^1.2.10"
 	},
 	"devDependencies": {
 		"@ralph/config": "workspace:*",
