@@ -1,25 +1,22 @@
 import { createOpencode, type OpencodeClient } from "@opencode-ai/sdk/v2";
 
-let client: OpencodeClient;
-let close: () => void;
+export class Opencode {
+	private client: OpencodeClient | undefined;
+	private server: { url: string; close(): void } | undefined;
 
-export const opencode = {
-	async init() {
-		const result = await createOpencode();
-		client = result.client;
-		close = () => result.server.close();
-		return client;
-	},
-
-	get() {
-		if (!client) {
-			throw new Error("opencode not initialized — call init() first");
+	async get(): Promise<OpencodeClient> {
+		if (!this.client) {
+			const result = await createOpencode();
+			this.client = result.client;
+			this.server = result.server;
 		}
-		return client;
-	},
+		return this.client;
+	}
 
-	async dispose() {
-		await client?.instance.dispose();
-		close?.();
-	},
-};
+	async dispose(): Promise<void> {
+		await this.client?.instance.dispose();
+		this.server?.close();
+		this.client = undefined;
+		this.server = undefined;
+	}
+}
