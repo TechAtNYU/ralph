@@ -5,6 +5,9 @@
 	"private": true,
 	"scripts": {
 		"dev": "bun run --watch src/index.tsx",
+		"daemon": "bun run src/daemon/server.ts",
+		"daemon:ctl": "bun run src/cli.ts",
+		"test": "bun test",
 		"check:types": "tsc --noEmit"
 	},
 	"devDependencies": {
