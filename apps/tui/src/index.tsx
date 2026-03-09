@@ -1,10 +1,8 @@
-import { spawn } from "node:child_process";
-import { resolve } from "node:path";
-
 import { createCliRenderer, TextAttributes } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
 import { health, isDaemonRunning, listJobs } from "./daemon/client";
+import { ensureDaemonRunning } from "./daemon/launcher";
 
 interface AppProps {
 	daemonOnline: boolean;
@@ -24,51 +22,38 @@ function App({ daemonOnline, statusLine, jobLine }: AppProps) {
 				</text>
 				<text attributes={TextAttributes.DIM}>{jobLine}</text>
 				<text attributes={TextAttributes.DIM}>
-					Submit job: bun run daemon:ctl submit "prompt"
+					Submit job: ralph daemon submit "prompt"
 				</text>
 			</box>
 		</box>
 	);
 }
 
-async function startDaemonInBackground(): Promise<boolean> {
-	const serverScript = resolve(import.meta.dir, "daemon/server.ts");
-	const child = spawn("bun", ["run", serverScript], {
-		stdio: "ignore",
-		detached: true,
-	});
-	child.unref();
+export async function runTui(): Promise<void> {
+	const renderer = await createCliRenderer();
 
-	// Poll until the daemon is reachable (up to 3 seconds)
-	const maxAttempts = 30;
-	for (let i = 0; i < maxAttempts; i++) {
-		await Bun.sleep(100);
-		if (await isDaemonRunning()) {
-			return true;
-		}
+	let daemonOnline = false;
+	let statusLine = "Daemon offline — failed to auto-start";
+	let jobLine = "No daemon status available";
+
+	daemonOnline = await ensureDaemonRunning();
+
+	if (daemonOnline) {
+		const daemonHealth = await health();
+		const jobs = await listJobs();
+		statusLine = `Daemon online (pid ${daemonHealth.pid})`;
+		jobLine = `${jobs.jobs.length} total jobs, ${daemonHealth.running} running, ${daemonHealth.queued} queued`;
 	}
-	return false;
+
+	createRoot(renderer).render(
+		<App
+			daemonOnline={daemonOnline}
+			statusLine={statusLine}
+			jobLine={jobLine}
+		/>,
+	);
 }
 
-const renderer = await createCliRenderer();
-
-let daemonOnline = false;
-let statusLine = "Daemon offline — failed to auto-start";
-let jobLine = "No daemon status available";
-
-if (!(await isDaemonRunning())) {
-	daemonOnline = await startDaemonInBackground();
-} else {
-	daemonOnline = true;
+if (import.meta.main) {
+	void runTui();
 }
-
-if (daemonOnline) {
-	const daemonHealth = await health();
-	const jobs = await listJobs();
-	statusLine = `Daemon online (pid ${daemonHealth.pid})`;
-	jobLine = `${jobs.jobs.length} total jobs, ${daemonHealth.running} running, ${daemonHealth.queued} queued`;
-}
-
-createRoot(renderer).render(
-	<App daemonOnline={daemonOnline} statusLine={statusLine} jobLine={jobLine} />,
-);

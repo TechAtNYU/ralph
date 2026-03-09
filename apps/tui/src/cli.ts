@@ -1,3 +1,6 @@
+import { Crust } from "@crustjs/core";
+import { helpPlugin } from "@crustjs/plugins";
+
 import {
 	cancelJob,
 	getJob,
@@ -6,82 +9,139 @@ import {
 	listJobs,
 	submit,
 } from "./daemon/client";
+import { ensureDaemonRunning, stopDaemon } from "./daemon/launcher";
+import { runDaemonServer } from "./daemon/server";
+import { runTui } from "./index";
 
-function usage(): void {
-	process.stdout.write(
-		[
-			"Usage:",
-			"  bun run daemon:ctl health",
-			'  bun run daemon:ctl submit "your prompt"',
-			"  bun run daemon:ctl list",
-			"  bun run daemon:ctl get <job-id>",
-			"  bun run daemon:ctl cancel <job-id>",
-		].join("\n"),
+/**
+ * Helper: assert daemon is running before executing a client command.
+ */
+async function requireDaemon(): Promise<void> {
+	const running = await isDaemonRunning();
+	if (!running) {
+		throw new Error("ralphd is not running. Start it with: ralph daemon start");
+	}
+}
+
+const cli = new Crust("ralph")
+	.meta({ description: "Ralph — AI loop runner" })
+	.use(helpPlugin())
+	// Default: launch TUI
+	.run(async () => {
+		await runTui();
+	})
+	// -- daemon subcommand group --
+	.command("daemon", (daemon) =>
+		daemon
+			.meta({ description: "Manage the background daemon" })
+			// ralph daemon serve  (foreground, for debugging / system services)
+			.command("serve", (cmd) =>
+				cmd
+					.meta({ description: "Run the daemon in the foreground" })
+					.run(async () => {
+						await runDaemonServer();
+					}),
+			)
+			// ralph daemon start  (detached background)
+			.command("start", (cmd) =>
+				cmd
+					.meta({ description: "Start the daemon in the background" })
+					.run(async () => {
+						if (await isDaemonRunning()) {
+							const h = await health();
+							console.log(
+								`ralphd is already running (pid ${h.pid}, uptime ${h.uptimeSeconds}s)`,
+							);
+							return;
+						}
+						const ok = await ensureDaemonRunning();
+						if (ok) {
+							const h = await health();
+							console.log(`ralphd started (pid ${h.pid})`);
+						} else {
+							throw new Error("Failed to start ralphd");
+						}
+					}),
+			)
+			// ralph daemon stop
+			.command("stop", (cmd) =>
+				cmd.meta({ description: "Stop the running daemon" }).run(async () => {
+					await stopDaemon();
+					console.log("ralphd stopped");
+				}),
+			)
+			// ralph daemon health
+			.command("health", (cmd) =>
+				cmd.meta({ description: "Show daemon health status" }).run(async () => {
+					await requireDaemon();
+					const result = await health();
+					console.log(JSON.stringify(result, null, 2));
+				}),
+			)
+			// ralph daemon submit <prompt...>
+			.command("submit", (cmd) =>
+				cmd
+					.meta({ description: "Submit a new job" })
+					.args([
+						{
+							name: "prompt",
+							type: "string" as const,
+							required: true,
+							variadic: true,
+							description: "The prompt for the loop job",
+						},
+					])
+					.run(async ({ args }) => {
+						await requireDaemon();
+						const prompt = args.prompt.join(" ");
+						const result = await submit(prompt);
+						console.log(JSON.stringify(result, null, 2));
+					}),
+			)
+			// ralph daemon list
+			.command("list", (cmd) =>
+				cmd.meta({ description: "List all jobs" }).run(async () => {
+					await requireDaemon();
+					const result = await listJobs();
+					console.log(JSON.stringify(result, null, 2));
+				}),
+			)
+			// ralph daemon get <jobId>
+			.command("get", (cmd) =>
+				cmd
+					.meta({ description: "Get details of a specific job" })
+					.args([
+						{
+							name: "jobId",
+							type: "string" as const,
+							required: true,
+							description: "The job ID",
+						},
+					])
+					.run(async ({ args }) => {
+						await requireDaemon();
+						const result = await getJob(args.jobId);
+						console.log(JSON.stringify(result, null, 2));
+					}),
+			)
+			// ralph daemon cancel <jobId>
+			.command("cancel", (cmd) =>
+				cmd
+					.meta({ description: "Cancel a job" })
+					.args([
+						{
+							name: "jobId",
+							type: "string" as const,
+							required: true,
+							description: "The job ID",
+						},
+					])
+					.run(async ({ args }) => {
+						await requireDaemon();
+						const result = await cancelJob(args.jobId);
+						console.log(JSON.stringify(result, null, 2));
+					}),
+			),
 	);
-	process.stdout.write("\n");
-}
 
-async function run(): Promise<void> {
-	const [command, ...args] = Bun.argv.slice(2);
-
-	if (!command) {
-		usage();
-		process.exit(1);
-	}
-
-	if (command !== "health") {
-		const running = await isDaemonRunning();
-		if (!running) {
-			throw new Error("ralphd is not running. Start it with: bun run daemon");
-		}
-	}
-
-	switch (command) {
-		case "health": {
-			const status = await health();
-			process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
-			break;
-		}
-		case "submit": {
-			const prompt = args.join(" ").trim();
-			if (!prompt) {
-				throw new Error("submit requires a prompt");
-			}
-			const result = await submit(prompt);
-			process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-			break;
-		}
-		case "list": {
-			const result = await listJobs();
-			process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-			break;
-		}
-		case "get": {
-			const jobId = args[0];
-			if (!jobId) {
-				throw new Error("get requires a job id");
-			}
-			const result = await getJob(jobId);
-			process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-			break;
-		}
-		case "cancel": {
-			const jobId = args[0];
-			if (!jobId) {
-				throw new Error("cancel requires a job id");
-			}
-			const result = await cancelJob(jobId);
-			process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-			break;
-		}
-		default:
-			usage();
-			process.exit(1);
-	}
-}
-
-run().catch((error) => {
-	const message = error instanceof Error ? error.message : String(error);
-	process.stderr.write(`${message}\n`);
-	process.exit(1);
-});
+await cli.execute();

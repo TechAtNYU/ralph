@@ -4,9 +4,9 @@
 	"type": "module",
 	"private": true,
 	"scripts": {
-		"dev": "bun run --watch src/index.tsx",
-		"daemon": "bun run src/daemon/server.ts",
-		"daemon:ctl": "bun run src/cli.ts",
+		"dev": "bun run src/cli.ts",
+		"build": "bun build src/cli.ts --compile --target=bun --minify --outfile dist/ralph",
+		"start": "bun run dist/ralph",
 		"test": "bun test",
 		"check:types": "tsc --noEmit"
 	},
@@ -17,6 +17,8 @@
 		"typescript": "^5"
 	},
 	"dependencies": {
+		"@crustjs/core": "^0.0.13",
+		"@crustjs/plugins": "^0.0.16",
 		"@opencode-ai/sdk": "^1.2.10",
 		"@opentui/core": "^0.1.77",
 		"@opentui/react": "^0.1.77",
