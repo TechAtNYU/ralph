@@ -27,8 +27,12 @@ export interface DaemonState {
 
 export interface RequestMessage {
 	id: string;
-	method: "health" | "submit" | "list" | "get" | "cancel";
+	method: "health" | "submit" | "list" | "get" | "cancel" | "shutdown";
 	params?: Record<string, unknown>;
+}
+
+export interface ShutdownResult {
+	ok: true;
 }
 
 export interface ResponseMessage {

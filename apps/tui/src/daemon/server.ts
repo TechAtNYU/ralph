@@ -13,6 +13,7 @@ import type {
 	LoopJob,
 	RequestMessage,
 	ResponseMessage,
+	ShutdownResult,
 	SubmitResult,
 } from "./protocol";
 import { SOCKET_PATH } from "./protocol";
@@ -30,8 +31,13 @@ export class Daemon {
 	private readonly queue: string[] = [];
 	private readonly running = new Map<string, AbortController>();
 	private startedAt = Date.now();
+	private onShutdown: (() => void) | undefined;
 
 	constructor(private readonly store: StateStore) {}
+
+	setShutdownHandler(handler: () => void): void {
+		this.onShutdown = handler;
+	}
 
 	async bootstrap(): Promise<void> {
 		this.state = await this.store.load();
@@ -130,6 +136,12 @@ export class Daemon {
 					this.running.get(job.id)?.abort();
 
 					const result: CancelResult = { job };
+					return { id: raw.id, ok: true, result };
+				}
+				case "shutdown": {
+					const result: ShutdownResult = { ok: true };
+					// Respond before shutting down so the client gets a reply
+					setTimeout(() => this.onShutdown?.(), 50);
 					return { id: raw.id, ok: true, result };
 				}
 				default:
@@ -277,7 +289,7 @@ export function createConnectionHandler(daemon: Daemon) {
 	};
 }
 
-async function main(): Promise<void> {
+export async function runDaemonServer(): Promise<void> {
 	await mkdir(RALPH_HOME, { recursive: true });
 	await ensureSocketDir();
 	await clearStaleSocket();
@@ -297,10 +309,11 @@ async function main(): Promise<void> {
 		process.exit(0);
 	};
 
+	daemon.setShutdownHandler(() => void shutdown());
 	process.on("SIGINT", () => void shutdown());
 	process.on("SIGTERM", () => void shutdown());
 }
 
 if (import.meta.main) {
-	void main();
+	void runDaemonServer();
 }

@@ -9,6 +9,7 @@ import type {
 	ListResult,
 	RequestMessage,
 	ResponseMessage,
+	ShutdownResult,
 	SubmitResult,
 } from "./protocol";
 import { SOCKET_PATH } from "./protocol";
@@ -104,6 +105,10 @@ export class DaemonClient {
 	async cancelJob(jobId: string): Promise<CancelResult> {
 		return send<CancelResult>(this.socketPath, "cancel", { jobId });
 	}
+
+	async shutdown(): Promise<ShutdownResult> {
+		return send<ShutdownResult>(this.socketPath, "shutdown");
+	}
 }
 
 // Default client using the standard socket path — convenience for production callers.
@@ -115,3 +120,4 @@ export const submit = (prompt: string) => defaultClient.submit(prompt);
 export const listJobs = () => defaultClient.listJobs();
 export const getJob = (jobId: string) => defaultClient.getJob(jobId);
 export const cancelJob = (jobId: string) => defaultClient.cancelJob(jobId);
+export const shutdown = () => defaultClient.shutdown();
