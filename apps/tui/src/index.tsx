@@ -1,3 +1,6 @@
+import { spawn } from "node:child_process";
+import { resolve } from "node:path";
+
 import { createCliRenderer, TextAttributes } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
@@ -28,14 +31,38 @@ function App({ daemonOnline, statusLine, jobLine }: AppProps) {
 	);
 }
 
+async function startDaemonInBackground(): Promise<boolean> {
+	const serverScript = resolve(import.meta.dir, "daemon/server.ts");
+	const child = spawn("bun", ["run", serverScript], {
+		stdio: "ignore",
+		detached: true,
+	});
+	child.unref();
+
+	// Poll until the daemon is reachable (up to 3 seconds)
+	const maxAttempts = 30;
+	for (let i = 0; i < maxAttempts; i++) {
+		await Bun.sleep(100);
+		if (await isDaemonRunning()) {
+			return true;
+		}
+	}
+	return false;
+}
+
 const renderer = await createCliRenderer();
 
 let daemonOnline = false;
-let statusLine = "Daemon offline. Start it with: bun run daemon";
+let statusLine = "Daemon offline — failed to auto-start";
 let jobLine = "No daemon status available";
 
-if (await isDaemonRunning()) {
+if (!(await isDaemonRunning())) {
+	daemonOnline = await startDaemonInBackground();
+} else {
 	daemonOnline = true;
+}
+
+if (daemonOnline) {
 	const daemonHealth = await health();
 	const jobs = await listJobs();
 	statusLine = `Daemon online (pid ${daemonHealth.pid})`;
