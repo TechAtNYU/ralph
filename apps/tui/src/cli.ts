@@ -26,7 +26,6 @@ async function requireDaemon(): Promise<void> {
 const cli = new Crust("ralph")
 	.meta({ description: "Ralph — AI loop runner" })
 	.use(helpPlugin())
-	// Default: launch TUI
 	.run(async () => {
 		await runTui();
 	})
