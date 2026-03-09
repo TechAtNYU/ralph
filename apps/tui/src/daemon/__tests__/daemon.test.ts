@@ -25,15 +25,18 @@ describe("Daemon", () => {
 	let tmpDir: string;
 	let store: StateStore;
 	let daemon: Daemon;
+	let daemons: Daemon[];
 
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(join(tmpdir(), "ralph-daemon-test-"));
 		store = new StateStore(join(tmpDir, "state.json"));
 		daemon = new Daemon(store);
+		daemons = [daemon];
 		await daemon.bootstrap();
 	});
 
 	afterEach(async () => {
+		await Promise.allSettled(daemons.map((instance) => instance.shutdown()));
 		await rm(tmpDir, { recursive: true, force: true });
 	});
 
@@ -197,6 +200,7 @@ describe("Daemon", () => {
 
 			// Create a new daemon with same store and bootstrap
 			const daemon2 = new Daemon(store);
+			daemons.push(daemon2);
 			await daemon2.bootstrap();
 
 			const res = await daemon2.handleRequest(
@@ -227,6 +231,7 @@ describe("Daemon", () => {
 			});
 
 			const daemon2 = new Daemon(store);
+			daemons.push(daemon2);
 			await daemon2.bootstrap();
 
 			const res = await daemon2.handleRequest(

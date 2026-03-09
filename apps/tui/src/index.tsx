@@ -1,7 +1,7 @@
 import { createCliRenderer, TextAttributes } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 
-import { health, isDaemonRunning, listJobs } from "./daemon/client";
+import { health, listJobs } from "./daemon/client";
 import { ensureDaemonRunning } from "./daemon/launcher";
 
 interface AppProps {
@@ -39,10 +39,17 @@ export async function runTui(): Promise<void> {
 	daemonOnline = await ensureDaemonRunning();
 
 	if (daemonOnline) {
-		const daemonHealth = await health();
-		const jobs = await listJobs();
-		statusLine = `Daemon online (pid ${daemonHealth.pid})`;
-		jobLine = `${jobs.jobs.length} total jobs, ${daemonHealth.running} running, ${daemonHealth.queued} queued`;
+		try {
+			const daemonHealth = await health();
+			const jobs = await listJobs();
+			statusLine = `Daemon online (pid ${daemonHealth.pid})`;
+			jobLine = `${jobs.jobs.length} total jobs, ${daemonHealth.running} running, ${daemonHealth.queued} queued`;
+		} catch (error) {
+			daemonOnline = false;
+			statusLine = "Daemon started, but status is unavailable";
+			jobLine =
+				error instanceof Error ? error.message : "No daemon status available";
+		}
 	}
 
 	createRoot(renderer).render(
