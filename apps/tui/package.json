@@ -11,7 +11,8 @@
 		"check:types": "tsc --noEmit"
 	},
 	"devDependencies": {
-		"@types/bun": "latest"
+		"@types/bun": "latest",
+		"@types/react": "^19.2.4"
 	},
 	"peerDependencies": {
 		"typescript": "^5"
@@ -22,6 +23,7 @@
 		"@opencode-ai/sdk": "^1.2.10",
 		"@opentui/core": "^0.1.77",
 		"@opentui/react": "^0.1.77",
-		"react": "^19.2.4"
+		"react": "^19.2.4",
+		"zod": "^4.3.6"
 	}
 }
