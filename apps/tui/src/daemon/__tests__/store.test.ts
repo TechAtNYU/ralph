@@ -3,13 +3,30 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { DaemonState, LoopJob } from "../protocol";
-import { StateStore } from "../store";
+import type { DaemonJob, DaemonState, ManagedInstance } from "../protocol";
+import { StateStore, StoreError } from "../store";
 
-function makeJob(overrides: Partial<LoopJob> = {}): LoopJob {
+function makeInstance(
+	overrides: Partial<ManagedInstance> = {},
+): ManagedInstance {
+	return {
+		id: overrides.id ?? "instance-1",
+		name: overrides.name ?? "Instance One",
+		directory: overrides.directory ?? "/tmp/project-one",
+		status: overrides.status ?? "stopped",
+		maxConcurrency: overrides.maxConcurrency ?? 1,
+		createdAt: overrides.createdAt ?? "2026-01-01T00:00:00.000Z",
+		updatedAt: overrides.updatedAt ?? "2026-01-01T00:00:00.000Z",
+		...overrides,
+	};
+}
+
+function makeJob(overrides: Partial<DaemonJob> = {}): DaemonJob {
 	return {
 		id: overrides.id ?? "job-1",
-		prompt: overrides.prompt ?? "test prompt",
+		instanceId: overrides.instanceId ?? "instance-1",
+		session: overrides.session ?? { type: "new" },
+		task: overrides.task ?? { type: "prompt", prompt: "test prompt" },
 		state: overrides.state ?? "queued",
 		createdAt: overrides.createdAt ?? "2026-01-01T00:00:00.000Z",
 		updatedAt: overrides.updatedAt ?? "2026-01-01T00:00:00.000Z",
@@ -32,130 +49,91 @@ describe("StateStore", () => {
 		await rm(tmpDir, { recursive: true, force: true });
 	});
 
-	describe("load", () => {
-		test("returns empty state when file does not exist", async () => {
-			const state = await store.load();
-			expect(state).toEqual({ jobs: [] });
-		});
-
-		test("returns empty state when file has invalid JSON structure", async () => {
-			await Bun.write(statePath, JSON.stringify({ jobs: "not-an-array" }));
-			const state = await store.load();
-			expect(state).toEqual({ jobs: [] });
-		});
-
-		test("loads persisted jobs from disk", async () => {
-			const job = makeJob();
-			await Bun.write(statePath, JSON.stringify({ jobs: [job] }));
-
-			const state = await store.load();
-			expect(state.jobs).toHaveLength(1);
-			expect(state.jobs[0]?.id).toBe("job-1");
-		});
-
-		test("throws on non-ENOENT errors", async () => {
-			// Point at a directory instead of file to trigger EISDIR
-			const badStore = new StateStore(tmpDir);
-			expect(badStore.load()).rejects.toThrow();
-		});
+	test("returns empty state when file does not exist", async () => {
+		const state = await store.load();
+		expect(state).toEqual({ version: 2, instances: [], jobs: [] });
 	});
 
-	describe("save", () => {
-		test("writes state to disk as formatted JSON", async () => {
-			const state: DaemonState = { jobs: [makeJob()] };
-			await store.save(state);
+	test("migrates legacy state to version 2", async () => {
+		await Bun.write(
+			statePath,
+			JSON.stringify({
+				jobs: [
+					{
+						id: "legacy-running",
+						prompt: "legacy",
+						state: "running",
+						createdAt: "2026-01-01T00:00:00.000Z",
+						updatedAt: "2026-01-01T00:00:00.000Z",
+					},
+				],
+			}),
+		);
 
-			const raw = await readFile(statePath, "utf8");
-			expect(raw).toEndWith("\n");
-			const parsed = JSON.parse(raw);
-			expect(parsed.jobs).toHaveLength(1);
-			expect(parsed.jobs[0].id).toBe("job-1");
-		});
-
-		test("creates parent directories if missing", async () => {
-			const nestedPath = join(tmpDir, "a", "b", "state.json");
-			const nestedStore = new StateStore(nestedPath);
-			await nestedStore.save({ jobs: [] });
-
-			const raw = await readFile(nestedPath, "utf8");
-			expect(JSON.parse(raw)).toEqual({ jobs: [] });
-		});
+		const state = await store.load();
+		expect(state.version).toBe(2);
+		expect(state.jobs[0]?.instanceId).toBeNull();
+		expect(state.jobs[0]?.state).toBe("failed");
+		expect(state.jobs[0]?.error).toContain("Cannot resume legacy job");
 	});
 
-	describe("upsertJob", () => {
-		test("adds a new job to empty state", () => {
-			const state: DaemonState = { jobs: [] };
-			const job = makeJob();
-			const next = store.upsertJob(state, job);
-			expect(next.jobs).toHaveLength(1);
-			expect(next.jobs[0]?.id).toBe("job-1");
-		});
+	test("writes state to disk as formatted JSON", async () => {
+		const state: DaemonState = {
+			version: 2,
+			instances: [makeInstance()],
+			jobs: [makeJob()],
+		};
+		await store.save(state);
 
-		test("replaces existing job with same id", () => {
-			const state: DaemonState = { jobs: [makeJob()] };
-			const updated = makeJob({ state: "running" });
-			const next = store.upsertJob(state, updated);
-			expect(next.jobs).toHaveLength(1);
-			expect(next.jobs[0]?.state).toBe("running");
-		});
-
-		test("does not mutate original state object", () => {
-			const state: DaemonState = { jobs: [makeJob()] };
-			const updated = makeJob({
-				id: "job-2",
-				createdAt: "2026-01-02T00:00:00.000Z",
-			});
-			const next = store.upsertJob(state, updated);
-			expect(state.jobs).toHaveLength(1);
-			expect(next.jobs).toHaveLength(2);
-		});
-
-		test("sorts jobs by createdAt descending", () => {
-			const state: DaemonState = { jobs: [] };
-			const job1 = makeJob({
-				id: "job-1",
-				createdAt: "2026-01-01T00:00:00.000Z",
-			});
-			const job2 = makeJob({
-				id: "job-2",
-				createdAt: "2026-01-03T00:00:00.000Z",
-			});
-			const job3 = makeJob({
-				id: "job-3",
-				createdAt: "2026-01-02T00:00:00.000Z",
-			});
-			let next = store.upsertJob(state, job1);
-			next = store.upsertJob(next, job2);
-			next = store.upsertJob(next, job3);
-			expect(next.jobs.map((j) => j.id)).toEqual(["job-2", "job-3", "job-1"]);
-		});
+		const raw = await readFile(statePath, "utf8");
+		expect(raw).toEndWith("\n");
+		const parsed = JSON.parse(raw);
+		expect(parsed.instances).toHaveLength(1);
+		expect(parsed.jobs).toHaveLength(1);
 	});
 
-	describe("getJob", () => {
-		test("returns job by id", () => {
-			const state: DaemonState = { jobs: [makeJob()] };
-			const found = store.getJob(state, "job-1");
-			expect(found).toBeDefined();
-			expect(found?.id).toBe("job-1");
-		});
-
-		test("returns undefined for missing id", () => {
-			const state: DaemonState = { jobs: [makeJob()] };
-			const found = store.getJob(state, "nonexistent");
-			expect(found).toBeUndefined();
-		});
+	test("adds and updates instances", () => {
+		let state: DaemonState = { version: 2, instances: [], jobs: [] };
+		state = store.createInstance(state, makeInstance(), true);
+		expect(state.defaultInstanceId).toBe("instance-1");
+		state = store.upsertInstance(
+			state,
+			makeInstance({
+				status: "running",
+				updatedAt: "2026-01-02T00:00:00.000Z",
+			}),
+		);
+		expect(state.instances[0]?.status).toBe("running");
 	});
 
-	describe("round-trip", () => {
-		test("save then load preserves data", async () => {
-			const job = makeJob({ state: "succeeded", output: "done" });
-			const state: DaemonState = { jobs: [job] };
-			await store.save(state);
+	test("rejects duplicate instance directories", () => {
+		const state: DaemonState = {
+			version: 2,
+			instances: [makeInstance()],
+			jobs: [],
+		};
+		expect(() =>
+			store.createInstance(
+				state,
+				makeInstance({ id: "instance-2", directory: "/tmp/project-one" }),
+			),
+		).toThrow(StoreError);
+	});
 
-			const loaded = await store.load();
-			expect(loaded.jobs).toHaveLength(1);
-			expect(loaded.jobs[0]?.state).toBe("succeeded");
-			expect(loaded.jobs[0]?.output).toBe("done");
-		});
+	test("filters jobs by instance and state", () => {
+		const state: DaemonState = {
+			version: 2,
+			instances: [
+				makeInstance(),
+				makeInstance({ id: "instance-2", directory: "/tmp/project-two" }),
+			],
+			jobs: [
+				makeJob(),
+				makeJob({ id: "job-2", instanceId: "instance-2" }),
+				makeJob({ id: "job-3", state: "running" }),
+			],
+		};
+		expect(store.listJobs(state, { instanceId: "instance-1" })).toHaveLength(2);
+		expect(store.listJobs(state, { state: "running" })).toHaveLength(1);
 	});
 });

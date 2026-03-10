@@ -4,242 +4,317 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type {
-	CancelResult,
-	GetResult,
-	HealthResult,
-	ListResult,
 	RequestMessage,
-	SubmitResult,
+	RequestMethod,
+	ResponseMessage,
+	ResultByMethod,
 } from "../protocol";
+import { RequestMessage as RequestMessageSchema } from "../protocol";
 import { Daemon } from "../server";
 import { StateStore } from "../store";
+import { FakeOpencodeRegistry } from "./helpers";
 
-function req(
-	method: RequestMessage["method"],
-	params?: Record<string, unknown>,
-): RequestMessage {
-	return { id: `req-${Date.now()}-${Math.random()}`, method, params };
+function req(payload: RequestMessage): RequestMessage {
+	return RequestMessageSchema.parse(payload);
+}
+
+function expectSuccess<M extends RequestMethod>(
+	response: ResponseMessage,
+	method: M,
+): ResultByMethod<M> {
+	expect(response.ok).toBe(true);
+	if (!response.ok || response.method !== method) {
+		throw new Error(`expected success for ${method}`);
+	}
+	return response.result as ResultByMethod<M>;
+}
+
+function expectFailure(
+	response: ResponseMessage,
+): ResponseMessage & { ok: false } {
+	expect(response.ok).toBe(false);
+	if (response.ok) {
+		throw new Error("expected failure response");
+	}
+	return response;
 }
 
 describe("Daemon", () => {
 	let tmpDir: string;
 	let store: StateStore;
+	let registry: FakeOpencodeRegistry;
 	let daemon: Daemon;
-	let daemons: Daemon[];
 
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(join(tmpdir(), "ralph-daemon-test-"));
 		store = new StateStore(join(tmpDir, "state.json"));
-		daemon = new Daemon(store);
-		daemons = [daemon];
+		registry = new FakeOpencodeRegistry(40);
+		daemon = new Daemon(store, { registry });
 		await daemon.bootstrap();
 	});
 
 	afterEach(async () => {
-		await Promise.allSettled(daemons.map((instance) => instance.shutdown()));
+		await daemon.shutdown();
 		await rm(tmpDir, { recursive: true, force: true });
 	});
 
-	describe("health", () => {
-		test("returns pid and zero counters on fresh daemon", async () => {
-			const res = await daemon.handleRequest(req("health"));
-			expect(res.ok).toBe(true);
-			const result = res.result as HealthResult;
-			expect(result.pid).toBe(process.pid);
-			expect(result.queued).toBe(0);
-			expect(result.running).toBe(0);
-			expect(result.finished).toBe(0);
-			expect(result.uptimeSeconds).toBeGreaterThanOrEqual(0);
-		});
+	test("creates the first instance as default", async () => {
+		const response = await daemon.handleRequest(
+			req({
+				id: "instance-create",
+				method: "instance.create",
+				params: {
+					name: "One",
+					directory: "/tmp/project-one",
+				},
+			}),
+		);
+		const result = expectSuccess(response, "instance.create");
+		expect(result.instance.id).toBeTruthy();
+
+		const health = await daemon.handleRequest(
+			req({
+				id: "health-1",
+				method: "daemon.health",
+				params: {},
+			}),
+		);
+		const healthResult = expectSuccess(health, "daemon.health");
+		expect(healthResult.defaultInstanceId).toBe(result.instance.id);
 	});
 
-	describe("submit", () => {
-		test("creates a job and returns it", async () => {
-			const res = await daemon.handleRequest(
-				req("submit", { prompt: "hello world" }),
-			);
-			expect(res.ok).toBe(true);
-			const result = res.result as SubmitResult;
-			expect(result.job.prompt).toBe("hello world");
-			expect(result.job.id).toBeTruthy();
-			// Job should be running or queued (CONCURRENCY=1 so first job starts immediately)
-			expect(["queued", "running"]).toContain(result.job.state);
-		});
-
-		test("rejects empty prompt", async () => {
-			const res = await daemon.handleRequest(req("submit", { prompt: "" }));
-			expect(res.ok).toBe(false);
-			expect(res.error).toBe("prompt is required");
-		});
-
-		test("rejects missing prompt", async () => {
-			const res = await daemon.handleRequest(req("submit", {}));
-			expect(res.ok).toBe(false);
-			expect(res.error).toBe("prompt is required");
-		});
-
-		test("rejects whitespace-only prompt", async () => {
-			const res = await daemon.handleRequest(req("submit", { prompt: "   " }));
-			expect(res.ok).toBe(false);
-			expect(res.error).toBe("prompt is required");
-		});
-	});
-
-	describe("list", () => {
-		test("returns empty list on fresh daemon", async () => {
-			const res = await daemon.handleRequest(req("list"));
-			expect(res.ok).toBe(true);
-			const result = res.result as ListResult;
-			expect(result.jobs).toEqual([]);
-		});
-
-		test("returns submitted jobs", async () => {
-			await daemon.handleRequest(req("submit", { prompt: "job 1" }));
-			await daemon.handleRequest(req("submit", { prompt: "job 2" }));
-
-			const res = await daemon.handleRequest(req("list"));
-			expect(res.ok).toBe(true);
-			const result = res.result as ListResult;
-			expect(result.jobs).toHaveLength(2);
-		});
-	});
-
-	describe("get", () => {
-		test("returns a specific job by id", async () => {
-			const submitRes = await daemon.handleRequest(
-				req("submit", { prompt: "find me" }),
-			);
-			const jobId = (submitRes.result as SubmitResult).job.id;
-
-			const res = await daemon.handleRequest(req("get", { jobId }));
-			expect(res.ok).toBe(true);
-			const result = res.result as GetResult;
-			expect(result.job.id).toBe(jobId);
-			expect(result.job.prompt).toBe("find me");
-		});
-
-		test("returns error for nonexistent job", async () => {
-			const res = await daemon.handleRequest(
-				req("get", { jobId: "nonexistent" }),
-			);
-			expect(res.ok).toBe(false);
-			expect(res.error).toContain("not found");
-		});
-	});
-
-	describe("cancel", () => {
-		test("cancels a queued job", async () => {
-			// Submit two jobs — with CONCURRENCY=1, the second should be queued
-			await daemon.handleRequest(req("submit", { prompt: "first" }));
-			const submitRes = await daemon.handleRequest(
-				req("submit", { prompt: "second" }),
-			);
-			const secondJob = (submitRes.result as SubmitResult).job;
-
-			// Wait a tick for drain to run
-			await Bun.sleep(10);
-
-			const res = await daemon.handleRequest(
-				req("cancel", { jobId: secondJob.id }),
-			);
-			expect(res.ok).toBe(true);
-			const result = res.result as CancelResult;
-			expect(result.job.state).toBe("cancelled");
-			expect(result.job.endedAt).toBeTruthy();
-		});
-
-		test("returns error for nonexistent job", async () => {
-			const res = await daemon.handleRequest(req("cancel", { jobId: "ghost" }));
-			expect(res.ok).toBe(false);
-			expect(res.error).toContain("not found");
-		});
-	});
-
-	describe("unsupported method", () => {
-		test("returns error for unknown method", async () => {
-			const res = await daemon.handleRequest(
-				req("unknown" as RequestMessage["method"]),
-			);
-			expect(res.ok).toBe(false);
-			expect(res.error).toContain("unsupported method");
-		});
-	});
-
-	describe("health counters after operations", () => {
-		test("reflects queued and running counts", async () => {
-			await daemon.handleRequest(req("submit", { prompt: "a" }));
-			await daemon.handleRequest(req("submit", { prompt: "b" }));
-
-			// Let drain run
-			await Bun.sleep(10);
-
-			const res = await daemon.handleRequest(req("health"));
-			const result = res.result as HealthResult;
-			// With CONCURRENCY=1: 1 running, 1 queued
-			expect(result.running).toBe(1);
-			expect(result.queued).toBe(1);
-		});
-	});
-
-	describe("bootstrap recovery", () => {
-		test("recovers running jobs as queued on restart", async () => {
-			// Pre-seed state with a "running" job
-			const now = new Date().toISOString();
-			await store.save({
-				jobs: [
-					{
-						id: "stale-job",
-						prompt: "stale",
-						state: "running",
-						createdAt: now,
-						updatedAt: now,
-						startedAt: now,
+	test("submits a job against the default instance", async () => {
+		const created = await daemon.handleRequest(
+			req({
+				id: "instance-create",
+				method: "instance.create",
+				params: {
+					name: "One",
+					directory: "/tmp/project-one",
+				},
+			}),
+		);
+		expectSuccess(created, "instance.create");
+		const submit = await daemon.handleRequest(
+			req({
+				id: "job-submit",
+				method: "job.submit",
+				params: {
+					session: { type: "new" },
+					task: {
+						type: "prompt",
+						prompt: "hello world",
 					},
-				],
-			});
+				},
+			}),
+		);
+		const result = expectSuccess(submit, "job.submit");
+		expect(result.job.instanceId).toBeTruthy();
+	});
 
-			// Create a new daemon with same store and bootstrap
-			const daemon2 = new Daemon(store);
-			daemons.push(daemon2);
-			await daemon2.bootstrap();
-
-			const res = await daemon2.handleRequest(
-				req("get", { jobId: "stale-job" }),
-			);
-			expect(res.ok).toBe(true);
-			const result = res.result as GetResult;
-			// Should have been re-queued (and likely immediately picked up as running again)
-			expect(["queued", "running"]).toContain(result.job.state);
-			expect(result.job.error).toBe("Recovered after daemon restart");
-		});
-
-		test("preserves succeeded/failed jobs on restart", async () => {
-			const now = new Date().toISOString();
-			await store.save({
-				jobs: [
-					{
-						id: "done-job",
-						prompt: "done",
-						state: "succeeded",
-						createdAt: now,
-						updatedAt: now,
-						startedAt: now,
-						endedAt: now,
-						output: "result",
+	test("rejects submit without any configured instance", async () => {
+		const submit = await daemon.handleRequest(
+			req({
+				id: "job-submit",
+				method: "job.submit",
+				params: {
+					session: { type: "new" },
+					task: {
+						type: "prompt",
+						prompt: "hello world",
 					},
-				],
-			});
+				},
+			}),
+		);
+		expect(expectFailure(submit).error.code).toBe("instance_unavailable");
+	});
 
-			const daemon2 = new Daemon(store);
-			daemons.push(daemon2);
-			await daemon2.bootstrap();
+	test("runs jobs on different instances in parallel", async () => {
+		const createOne = await daemon.handleRequest(
+			req({
+				id: "instance-create-1",
+				method: "instance.create",
+				params: {
+					name: "One",
+					directory: "/tmp/project-one",
+				},
+			}),
+		);
+		const createTwo = await daemon.handleRequest(
+			req({
+				id: "instance-create-2",
+				method: "instance.create",
+				params: {
+					name: "Two",
+					directory: "/tmp/project-two",
+				},
+			}),
+		);
+		const one = expectSuccess(createOne, "instance.create");
+		const two = expectSuccess(createTwo, "instance.create");
 
-			const res = await daemon2.handleRequest(
-				req("get", { jobId: "done-job" }),
-			);
-			expect(res.ok).toBe(true);
-			const result = res.result as GetResult;
-			expect(result.job.state).toBe("succeeded");
+		await daemon.handleRequest(
+			req({
+				id: "job-submit-1",
+				method: "job.submit",
+				params: {
+					instanceId: one.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "one" },
+				},
+			}),
+		);
+		await daemon.handleRequest(
+			req({
+				id: "job-submit-2",
+				method: "job.submit",
+				params: {
+					instanceId: two.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "two" },
+				},
+			}),
+		);
+
+		await Bun.sleep(80);
+		expect(registry.globalMaxConcurrent).toBeGreaterThanOrEqual(2);
+	});
+
+	test("respects per-instance concurrency", async () => {
+		const created = await daemon.handleRequest(
+			req({
+				id: "instance-create",
+				method: "instance.create",
+				params: {
+					name: "One",
+					directory: "/tmp/project-one",
+					maxConcurrency: 1,
+				},
+			}),
+		);
+		const createdResult = expectSuccess(created, "instance.create");
+
+		await daemon.handleRequest(
+			req({
+				id: "job-submit-1",
+				method: "job.submit",
+				params: {
+					instanceId: createdResult.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "first" },
+				},
+			}),
+		);
+		await daemon.handleRequest(
+			req({
+				id: "job-submit-2",
+				method: "job.submit",
+				params: {
+					instanceId: createdResult.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "second" },
+				},
+			}),
+		);
+
+		await Bun.sleep(90);
+		expect(
+			registry.maxConcurrentByInstance.get(createdResult.instance.id),
+		).toBe(1);
+	});
+
+	test("cancels a queued job", async () => {
+		const one = await daemon.handleRequest(
+			req({
+				id: "instance-create-1",
+				method: "instance.create",
+				params: {
+					name: "One",
+					directory: "/tmp/project-one",
+					maxConcurrency: 1,
+				},
+			}),
+		);
+		const oneResult = expectSuccess(one, "instance.create");
+
+		await daemon.handleRequest(
+			req({
+				id: "job-submit-1",
+				method: "job.submit",
+				params: {
+					instanceId: oneResult.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "first" },
+				},
+			}),
+		);
+		const queued = await daemon.handleRequest(
+			req({
+				id: "job-submit-2",
+				method: "job.submit",
+				params: {
+					instanceId: oneResult.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "second" },
+				},
+			}),
+		);
+		const queuedResult = expectSuccess(queued, "job.submit");
+
+		const cancel = await daemon.handleRequest(
+			req({
+				id: "job-cancel",
+				method: "job.cancel",
+				params: {
+					jobId: queuedResult.job.id,
+				},
+			}),
+		);
+		expect(expectSuccess(cancel, "job.cancel").job.state).toBe("cancelled");
+	});
+
+	test("requeues running jobs after restart", async () => {
+		await store.save({
+			version: 2,
+			defaultInstanceId: "instance-1",
+			instances: [
+				{
+					id: "instance-1",
+					name: "One",
+					directory: "/tmp/project-one",
+					status: "running",
+					maxConcurrency: 1,
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-01T00:00:00.000Z",
+				},
+			],
+			jobs: [
+				{
+					id: "job-1",
+					instanceId: "instance-1",
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "recover" },
+					state: "running",
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-01T00:00:00.000Z",
+				},
+			],
 		});
+
+		const nextDaemon = new Daemon(store, {
+			registry: new FakeOpencodeRegistry(10),
+		});
+		await nextDaemon.bootstrap();
+		const response = await nextDaemon.handleRequest(
+			req({
+				id: "job-get",
+				method: "job.get",
+				params: { jobId: "job-1" },
+			}),
+		);
+		expect(["queued", "running", "succeeded"]).toContain(
+			expectSuccess(response, "job.get").job.state,
+		);
+		await nextDaemon.shutdown();
 	});
 });

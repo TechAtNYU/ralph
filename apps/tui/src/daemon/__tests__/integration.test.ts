@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { DaemonClient } from "../client";
+import type { DaemonJob } from "../protocol";
 import { createConnectionHandler, Daemon } from "../server";
 import { StateStore } from "../store";
+import { FakeOpencodeRegistry } from "./helpers";
 
 describe("Integration: server + client over Unix socket", () => {
 	let tmpDir: string;
@@ -19,7 +21,7 @@ describe("Integration: server + client over Unix socket", () => {
 		tmpDir = await mkdtemp(join(tmpdir(), "ralph-integration-"));
 		testSocketPath = join(tmpDir, "test.sock");
 		const store = new StateStore(join(tmpDir, "state.json"));
-		daemon = new Daemon(store);
+		daemon = new Daemon(store, { registry: new FakeOpencodeRegistry(20) });
 		await daemon.bootstrap();
 
 		server = createServer(createConnectionHandler(daemon));
@@ -35,76 +37,53 @@ describe("Integration: server + client over Unix socket", () => {
 
 	afterEach(async () => {
 		server.close();
+		await daemon.shutdown();
 		await rm(tmpDir, { recursive: true, force: true });
 	});
 
 	test("isDaemonRunning returns true when server is up", async () => {
-		const running = await client.isDaemonRunning();
-		expect(running).toBe(true);
+		expect(await client.isDaemonRunning()).toBe(true);
 	});
 
-	test("health returns valid response", async () => {
-		const result = await client.health();
-		expect(result.pid).toBe(process.pid);
-		expect(result.uptimeSeconds).toBeGreaterThanOrEqual(0);
+	test("can create and list instances", async () => {
+		const created = await client.createInstance({
+			name: "One",
+			directory: "/tmp/project-one",
+		});
+		expect(created.instance.name).toBe("One");
+
+		const listed = await client.listInstances();
+		expect(listed.instances).toHaveLength(1);
+		expect(listed.defaultInstanceId).toBe(created.instance.id);
 	});
 
-	test("submit and then list shows the job", async () => {
-		const submitResult = await client.submit("integration test prompt");
-		expect(submitResult.job.prompt).toBe("integration test prompt");
-		expect(submitResult.job.id).toBeTruthy();
+	test("can submit and fetch jobs for a selected instance", async () => {
+		const created = await client.createInstance({
+			name: "One",
+			directory: "/tmp/project-one",
+		});
+		const submitted = await client.submitJob({
+			instanceId: created.instance.id,
+			session: { type: "new" },
+			task: {
+				type: "prompt",
+				prompt: "integration",
+			},
+		});
+		expect(submitted.job.instanceId).toBe(created.instance.id);
 
-		const listResult = await client.listJobs();
-		expect(listResult.jobs.length).toBeGreaterThanOrEqual(1);
-		const found = listResult.jobs.find((j) => j.id === submitResult.job.id);
-		expect(found).toBeDefined();
+		const listed = await client.listJobs({ instanceId: created.instance.id });
+		expect(
+			listed.jobs.some((job: DaemonJob) => job.id === submitted.job.id),
+		).toBe(true);
+
+		const fetched = await client.getJob(submitted.job.id);
+		expect(fetched.job.id).toBe(submitted.job.id);
 	});
 
-	test("submit and then get returns the same job", async () => {
-		const submitResult = await client.submit("get test");
-		const getResult = await client.getJob(submitResult.job.id);
-		expect(getResult.job.id).toBe(submitResult.job.id);
-		expect(getResult.job.prompt).toBe("get test");
-	});
-
-	test("submit two jobs and cancel the queued one", async () => {
-		// First job will start running (CONCURRENCY=1)
-		await client.submit("first job");
-		// Second job should be queued
-		const second = await client.submit("second job");
-
-		await Bun.sleep(10);
-
-		const cancelResult = await client.cancelJob(second.job.id);
-		expect(cancelResult.job.state).toBe("cancelled");
-	});
-
-	test("getJob returns error for nonexistent job", async () => {
-		expect(client.getJob("does-not-exist")).rejects.toThrow("not found");
-	});
-
-	test("cancelJob returns error for nonexistent job", async () => {
-		expect(client.cancelJob("does-not-exist")).rejects.toThrow("not found");
-	});
-
-	test("multiple sequential requests work correctly", async () => {
-		const health1 = await client.health();
-		const submit1 = await client.submit("seq test 1");
-		const submit2 = await client.submit("seq test 2");
-		const list = await client.listJobs();
-		const health2 = await client.health();
-
-		expect(health1.pid).toBe(health2.pid);
-		expect(list.jobs.length).toBeGreaterThanOrEqual(2);
-		expect(list.jobs.find((j) => j.id === submit1.job.id)).toBeDefined();
-		expect(list.jobs.find((j) => j.id === submit2.job.id)).toBeDefined();
-	});
-});
-
-describe("Client: isDaemonRunning when no server", () => {
-	test("returns false when socket does not exist", async () => {
-		const client = new DaemonClient("/tmp/ralph-nonexistent-test.sock");
-		const running = await client.isDaemonRunning();
-		expect(running).toBe(false);
+	test("client surfaces typed server errors", async () => {
+		await expect(client.getJob("missing")).rejects.toThrow(
+			"job missing not found",
+		);
 	});
 });
