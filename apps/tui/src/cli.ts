@@ -2,7 +2,7 @@ import { Crust } from "@crustjs/core";
 import { helpPlugin } from "@crustjs/plugins";
 import {
 	daemon,
-	JobState,
+	type JobState,
 	runForegroundDaemon,
 	startDetached,
 	stopDaemon,
@@ -28,17 +28,6 @@ function withDaemon<T>(
 
 function printJson(value: unknown): void {
 	console.log(JSON.stringify(value, null, 2));
-}
-
-function parseJobState(value: string | undefined) {
-	if (!value) {
-		return undefined;
-	}
-	const parsed = JobState.safeParse(value);
-	if (!parsed.success) {
-		throw new Error(`invalid job state: ${value}`);
-	}
-	return parsed.data;
 }
 
 const cli = new Crust("ralph")
@@ -86,9 +75,11 @@ const cli = new Crust("ralph")
 				}),
 			)
 			.command("health", (cmd) =>
-				cmd.meta({ description: "Show daemon health status" }).run(withDaemon(async () => {
-					printJson(await daemon.health());
-				})),
+				cmd.meta({ description: "Show daemon health status" }).run(
+					withDaemon(async () => {
+						printJson(await daemon.health());
+					}),
+				),
 			)
 			.command("submit", (cmd) =>
 				cmd
@@ -96,7 +87,7 @@ const cli = new Crust("ralph")
 					.args([
 						{
 							name: "prompt",
-							type: "string" as const,
+							type: "string",
 							required: true,
 							variadic: true,
 							description: "The prompt for the loop job",
@@ -113,20 +104,22 @@ const cli = new Crust("ralph")
 							description: "Existing session ID",
 						},
 					})
-					.run(withDaemon(async ({ args, flags }) => {
-						const prompt = args.prompt.join(" ").trim();
-						const result = await daemon.submitJob({
-							instanceId: flags.instance,
-							session: flags.session
-								? { type: "existing", sessionId: flags.session }
-								: { type: "new" },
-							task: {
-								type: "prompt",
-								prompt,
-							},
-						});
-						printJson(result);
-					})),
+					.run(
+						withDaemon(async ({ args, flags }) => {
+							const prompt = args.prompt.join(" ").trim();
+							const result = await daemon.submitJob({
+								instanceId: flags.instance,
+								session: flags.session
+									? { type: "existing", sessionId: flags.session }
+									: { type: "new" },
+								task: {
+									type: "prompt",
+									prompt,
+								},
+							});
+							printJson(result);
+						}),
+					),
 			)
 			.command("list", (cmd) =>
 				cmd
@@ -141,14 +134,16 @@ const cli = new Crust("ralph")
 							description: "Filter by job state",
 						},
 					})
-					.run(withDaemon(async ({ flags }) => {
-						printJson(
-							await daemon.listJobs({
-								instanceId: flags.instance,
-								state: parseJobState(flags.state),
-							}),
-						);
-					})),
+					.run(
+						withDaemon(async ({ flags }) => {
+							printJson(
+								await daemon.listJobs({
+									instanceId: flags.instance,
+									state: flags.state as JobState,
+								}),
+							);
+						}),
+					),
 			)
 			.command("get", (cmd) =>
 				cmd
@@ -156,14 +151,16 @@ const cli = new Crust("ralph")
 					.args([
 						{
 							name: "jobId",
-							type: "string" as const,
+							type: "string",
 							required: true,
 							description: "The job ID",
 						},
 					])
-					.run(withDaemon(async ({ args }) => {
-						printJson(await daemon.getJob(args.jobId));
-					})),
+					.run(
+						withDaemon(async ({ args }) => {
+							printJson(await daemon.getJob(args.jobId));
+						}),
+					),
 			)
 			.command("cancel", (cmd) =>
 				cmd
@@ -171,14 +168,16 @@ const cli = new Crust("ralph")
 					.args([
 						{
 							name: "jobId",
-							type: "string" as const,
+							type: "string",
 							required: true,
 							description: "The job ID",
 						},
 					])
-					.run(withDaemon(async ({ args }) => {
-						printJson(await daemon.cancelJob(args.jobId));
-					})),
+					.run(
+						withDaemon(async ({ args }) => {
+							printJson(await daemon.cancelJob(args.jobId));
+						}),
+					),
 			)
 			.command("instance", (instanceCommand) =>
 				instanceCommand
@@ -189,7 +188,7 @@ const cli = new Crust("ralph")
 							.args([
 								{
 									name: "name",
-									type: "string" as const,
+									type: "string",
 									required: true,
 									description: "Instance name",
 								},
@@ -205,22 +204,24 @@ const cli = new Crust("ralph")
 									description: "Per-instance concurrency",
 								},
 							})
-							.run(withDaemon(async ({ args, flags }) => {
-								printJson(
-									await daemon.createInstance({
-										name: args.name,
-										directory: flags.directory,
-										maxConcurrency: flags["max-concurrency"],
-									}),
-								);
-							})),
+							.run(
+								withDaemon(async ({ args, flags }) => {
+									printJson(
+										await daemon.createInstance({
+											name: args.name,
+											directory: flags.directory,
+											maxConcurrency: flags["max-concurrency"],
+										}),
+									);
+								}),
+							),
 					)
 					.command("list", (cmd) =>
-						cmd
-							.meta({ description: "List registered instances" })
-							.run(withDaemon(async () => {
+						cmd.meta({ description: "List registered instances" }).run(
+							withDaemon(async () => {
 								printJson(await daemon.listInstances());
-							})),
+							}),
+						),
 					)
 					.command("get", (cmd) =>
 						cmd
@@ -228,14 +229,16 @@ const cli = new Crust("ralph")
 							.args([
 								{
 									name: "instanceId",
-									type: "string" as const,
+									type: "string",
 									required: true,
 									description: "Instance ID",
 								},
 							])
-							.run(withDaemon(async ({ args }) => {
-								printJson(await daemon.getInstance(args.instanceId));
-							})),
+							.run(
+								withDaemon(async ({ args }) => {
+									printJson(await daemon.getInstance(args.instanceId));
+								}),
+							),
 					)
 					.command("start", (cmd) =>
 						cmd
@@ -243,14 +246,16 @@ const cli = new Crust("ralph")
 							.args([
 								{
 									name: "instanceId",
-									type: "string" as const,
+									type: "string",
 									required: true,
 									description: "Instance ID",
 								},
 							])
-							.run(withDaemon(async ({ args }) => {
-								printJson(await daemon.startInstance(args.instanceId));
-							})),
+							.run(
+								withDaemon(async ({ args }) => {
+									printJson(await daemon.startInstance(args.instanceId));
+								}),
+							),
 					)
 					.command("stop", (cmd) =>
 						cmd
@@ -258,14 +263,16 @@ const cli = new Crust("ralph")
 							.args([
 								{
 									name: "instanceId",
-									type: "string" as const,
+									type: "string",
 									required: true,
 									description: "Instance ID",
 								},
 							])
-							.run(withDaemon(async ({ args }) => {
-								printJson(await daemon.stopInstance(args.instanceId));
-							})),
+							.run(
+								withDaemon(async ({ args }) => {
+									printJson(await daemon.stopInstance(args.instanceId));
+								}),
+							),
 					)
 					.command("remove", (cmd) =>
 						cmd
@@ -273,14 +280,16 @@ const cli = new Crust("ralph")
 							.args([
 								{
 									name: "instanceId",
-									type: "string" as const,
+									type: "string",
 									required: true,
 									description: "Instance ID",
 								},
 							])
-							.run(withDaemon(async ({ args }) => {
-								printJson(await daemon.removeInstance(args.instanceId));
-							})),
+							.run(
+								withDaemon(async ({ args }) => {
+									printJson(await daemon.removeInstance(args.instanceId));
+								}),
+							),
 					),
 			),
 	);
