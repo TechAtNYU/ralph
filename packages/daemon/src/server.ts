@@ -443,19 +443,7 @@ export class Daemon {
 
 		this.drainPromise = this.drainQueue().finally(() => {
 			this.drainPromise = undefined;
-			if (!this.shuttingDown && this.hasQueuedWork()) {
-				this.scheduleDrain();
-			}
 		});
-	}
-
-	private hasQueuedWork(): boolean {
-		for (const queue of this.queues.values()) {
-			if (queue.length > 0) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	private dequeueNextJob(): DaemonJob | undefined {
