@@ -152,6 +152,7 @@ async function runCommand(command: string, args: string[], cwd?: string) {
 	await new Promise<void>((resolve, reject) => {
 		const child = spawn(command, args, {
 			cwd,
+			env: process.env,
 			stdio: "inherit",
 		});
 
@@ -168,6 +169,20 @@ async function runCommand(command: string, args: string[], cwd?: string) {
 			resolve();
 		});
 	});
+}
+
+async function syncOptionalDependenciesForTarget(spec: TargetSpec) {
+	await runCommand(
+		"bun",
+		[
+			"install",
+			"--frozen-lockfile",
+			"--ignore-scripts",
+			`--os=${spec.os}`,
+			`--cpu=${spec.cpu}`,
+		],
+		REPO_ROOT,
+	);
 }
 
 function unixLauncher(binaryName: "ralph" | "ralphd") {
@@ -265,6 +280,7 @@ export async function buildBinaries(
 	for (const target of targets) {
 		const spec = getTargetSpec(target);
 		const targetDir = join(outDir, target);
+		await syncOptionalDependenciesForTarget(spec);
 		await rm(targetDir, { recursive: true, force: true });
 		await mkdir(targetDir, { recursive: true });
 
@@ -479,6 +495,9 @@ export async function publishDistribution(
 		if (dryRun) {
 			console.log(`(dry-run) cwd=${packageDir} bun ${args.join(" ")}`);
 			continue;
+		}
+		if (!process.env.NPM_CONFIG_TOKEN && process.env.NPM_TOKEN) {
+			process.env.NPM_CONFIG_TOKEN = process.env.NPM_TOKEN;
 		}
 		await runCommand("bun", args, packageDir);
 	}

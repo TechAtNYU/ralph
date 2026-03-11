@@ -49,9 +49,9 @@ jobs:
         uses: changesets/action@v1
         with:
           version: bun run version:packages
-          publish: bun run release:build && bun run release:stage && bun run release:publish
+          publish: bun run release:ci
           commit: "chore: version packages"
           title: "chore: version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
