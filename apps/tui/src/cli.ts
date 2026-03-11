@@ -1,26 +1,32 @@
 import { Crust } from "@crustjs/core";
 import { helpPlugin } from "@crustjs/plugins";
 
-import {
-	cancelJob,
-	getJob,
-	health,
-	isDaemonRunning,
-	listJobs,
-	submit,
-} from "./daemon/client";
+import { daemon } from "./daemon/client";
 import { ensureDaemonRunning, stopDaemon } from "./daemon/launcher";
+import { JobState } from "./daemon/protocol";
 import { runDaemonServer } from "./daemon/server";
 import { runTui } from "./index";
 
-/**
- * Helper: assert daemon is running before executing a client command.
- */
 async function requireDaemon(): Promise<void> {
-	const running = await isDaemonRunning();
+	const running = await daemon.isDaemonRunning();
 	if (!running) {
 		throw new Error("ralphd is not running. Start it with: ralph daemon start");
 	}
+}
+
+function printJson(value: unknown): void {
+	console.log(JSON.stringify(value, null, 2));
+}
+
+function parseJobState(value: string | undefined) {
+	if (!value) {
+		return undefined;
+	}
+	const parsed = JobState.safeParse(value);
+	if (!parsed.success) {
+		throw new Error(`invalid job state: ${value}`);
+	}
+	return parsed.data;
 }
 
 const cli = new Crust("ralph")
@@ -29,11 +35,9 @@ const cli = new Crust("ralph")
 	.run(async () => {
 		await runTui();
 	})
-	// -- daemon subcommand group --
-	.command("daemon", (daemon) =>
-		daemon
+	.command("daemon", (daemonCommand) =>
+		daemonCommand
 			.meta({ description: "Manage the background daemon" })
-			// ralph daemon serve  (foreground, for debugging / system services)
 			.command("serve", (cmd) =>
 				cmd
 					.meta({ description: "Run the daemon in the foreground" })
@@ -41,43 +45,39 @@ const cli = new Crust("ralph")
 						await runDaemonServer();
 					}),
 			)
-			// ralph daemon start  (detached background)
 			.command("start", (cmd) =>
 				cmd
 					.meta({ description: "Start the daemon in the background" })
 					.run(async () => {
-						if (await isDaemonRunning()) {
-							const h = await health();
+						if (await daemon.isDaemonRunning()) {
+							const result = await daemon.health();
 							console.log(
-								`ralphd is already running (pid ${h.pid}, uptime ${h.uptimeSeconds}s)`,
+								`ralphd is already running (pid ${result.pid}, uptime ${result.uptimeSeconds}s)`,
 							);
 							return;
 						}
+
 						const ok = await ensureDaemonRunning();
-						if (ok) {
-							const h = await health();
-							console.log(`ralphd started (pid ${h.pid})`);
-						} else {
+						if (!ok) {
 							throw new Error("Failed to start ralphd");
 						}
+
+						const result = await daemon.health();
+						console.log(`ralphd started (pid ${result.pid})`);
 					}),
 			)
-			// ralph daemon stop
 			.command("stop", (cmd) =>
 				cmd.meta({ description: "Stop the running daemon" }).run(async () => {
 					await stopDaemon();
 					console.log("ralphd stopped");
 				}),
 			)
-			// ralph daemon health
 			.command("health", (cmd) =>
 				cmd.meta({ description: "Show daemon health status" }).run(async () => {
 					await requireDaemon();
-					const result = await health();
-					console.log(JSON.stringify(result, null, 2));
+					printJson(await daemon.health());
 				}),
 			)
-			// ralph daemon submit <prompt...>
 			.command("submit", (cmd) =>
 				cmd
 					.meta({ description: "Submit a new job" })
@@ -90,22 +90,56 @@ const cli = new Crust("ralph")
 							description: "The prompt for the loop job",
 						},
 					])
-					.run(async ({ args }) => {
+					.flags({
+						instance: {
+							type: "string",
+							required: true,
+							description: "Target instance ID",
+						},
+						session: {
+							type: "string",
+							description: "Existing session ID",
+						},
+					})
+					.run(async ({ args, flags }) => {
 						await requireDaemon();
-						const prompt = args.prompt.join(" ");
-						const result = await submit(prompt);
-						console.log(JSON.stringify(result, null, 2));
+						const prompt = args.prompt.join(" ").trim();
+						const result = await daemon.submitJob({
+							instanceId: flags.instance,
+							session: flags.session
+								? { type: "existing", sessionId: flags.session }
+								: { type: "new" },
+							task: {
+								type: "prompt",
+								prompt,
+							},
+						});
+						printJson(result);
 					}),
 			)
-			// ralph daemon list
 			.command("list", (cmd) =>
-				cmd.meta({ description: "List all jobs" }).run(async () => {
-					await requireDaemon();
-					const result = await listJobs();
-					console.log(JSON.stringify(result, null, 2));
-				}),
+				cmd
+					.meta({ description: "List all jobs" })
+					.flags({
+						instance: {
+							type: "string",
+							description: "Filter by instance ID",
+						},
+						state: {
+							type: "string",
+							description: "Filter by job state",
+						},
+					})
+					.run(async ({ flags }) => {
+						await requireDaemon();
+						printJson(
+							await daemon.listJobs({
+								instanceId: flags.instance,
+								state: parseJobState(flags.state),
+							}),
+						);
+					}),
 			)
-			// ralph daemon get <jobId>
 			.command("get", (cmd) =>
 				cmd
 					.meta({ description: "Get details of a specific job" })
@@ -119,11 +153,9 @@ const cli = new Crust("ralph")
 					])
 					.run(async ({ args }) => {
 						await requireDaemon();
-						const result = await getJob(args.jobId);
-						console.log(JSON.stringify(result, null, 2));
+						printJson(await daemon.getJob(args.jobId));
 					}),
 			)
-			// ralph daemon cancel <jobId>
 			.command("cancel", (cmd) =>
 				cmd
 					.meta({ description: "Cancel a job" })
@@ -137,9 +169,117 @@ const cli = new Crust("ralph")
 					])
 					.run(async ({ args }) => {
 						await requireDaemon();
-						const result = await cancelJob(args.jobId);
-						console.log(JSON.stringify(result, null, 2));
+						printJson(await daemon.cancelJob(args.jobId));
 					}),
+			)
+			.command("instance", (instanceCommand) =>
+				instanceCommand
+					.meta({ description: "Manage OpenCode instances" })
+					.command("create", (cmd) =>
+						cmd
+							.meta({ description: "Create a managed instance" })
+							.args([
+								{
+									name: "name",
+									type: "string" as const,
+									required: true,
+									description: "Instance name",
+								},
+							])
+							.flags({
+								directory: {
+									type: "string",
+									required: true,
+									description: "Workspace directory",
+								},
+								"max-concurrency": {
+									type: "number",
+									description: "Per-instance concurrency",
+								},
+							})
+							.run(async ({ args, flags }) => {
+								await requireDaemon();
+								printJson(
+									await daemon.createInstance({
+										name: args.name,
+										directory: flags.directory,
+										maxConcurrency: flags["max-concurrency"],
+									}),
+								);
+							}),
+					)
+					.command("list", (cmd) =>
+						cmd
+							.meta({ description: "List registered instances" })
+							.run(async () => {
+								await requireDaemon();
+								printJson(await daemon.listInstances());
+							}),
+					)
+					.command("get", (cmd) =>
+						cmd
+							.meta({ description: "Get a registered instance" })
+							.args([
+								{
+									name: "instanceId",
+									type: "string" as const,
+									required: true,
+									description: "Instance ID",
+								},
+							])
+							.run(async ({ args }) => {
+								await requireDaemon();
+								printJson(await daemon.getInstance(args.instanceId));
+							}),
+					)
+					.command("start", (cmd) =>
+						cmd
+							.meta({ description: "Start an instance" })
+							.args([
+								{
+									name: "instanceId",
+									type: "string" as const,
+									required: true,
+									description: "Instance ID",
+								},
+							])
+							.run(async ({ args }) => {
+								await requireDaemon();
+								printJson(await daemon.startInstance(args.instanceId));
+							}),
+					)
+					.command("stop", (cmd) =>
+						cmd
+							.meta({ description: "Stop an instance" })
+							.args([
+								{
+									name: "instanceId",
+									type: "string" as const,
+									required: true,
+									description: "Instance ID",
+								},
+							])
+							.run(async ({ args }) => {
+								await requireDaemon();
+								printJson(await daemon.stopInstance(args.instanceId));
+							}),
+					)
+					.command("remove", (cmd) =>
+						cmd
+							.meta({ description: "Remove an instance" })
+							.args([
+								{
+									name: "instanceId",
+									type: "string" as const,
+									required: true,
+									description: "Instance ID",
+								},
+							])
+							.run(async ({ args }) => {
+								await requireDaemon();
+								printJson(await daemon.removeInstance(args.instanceId));
+							}),
+					),
 			),
 	);
 

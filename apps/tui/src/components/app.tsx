@@ -99,23 +99,6 @@ export function App({ onQuit }: AppProps) {
 			void refresh(next);
 			return;
 		}
-
-		if (key.name === "d") {
-			const selected = data.instances[selectedIndex];
-			if (!selected) {
-				return;
-			}
-			void daemon
-				.setDefaultInstance(selected.id)
-				.then(() => refresh(selectedIndex))
-				.catch((setDefaultError) => {
-					setError(
-						setDefaultError instanceof Error
-							? setDefaultError.message
-							: "Failed to set default instance",
-					);
-				});
-		}
 	});
 
 	const selected = data?.instances[selectedIndex];
@@ -133,7 +116,7 @@ export function App({ onQuit }: AppProps) {
 				</text>
 				<text attributes={TextAttributes.DIM}>
 					{data
-						? `${data.health.running} running, ${data.health.queued} queued, default ${data.health.defaultInstanceId ?? "none"}`
+						? `${data.health.running} running, ${data.health.queued} queued`
 						: (error ?? "No data available")}
 				</text>
 			</box>
@@ -165,9 +148,7 @@ export function App({ onQuit }: AppProps) {
 										focused ? TextAttributes.BOLD : TextAttributes.DIM
 									}
 								>
-									{`${focused ? ">" : " "} ${instance.name} [${instance.status}] ${basename(instance.directory)} (${counts.running}r/${counts.queued}q)${
-										data.health.defaultInstanceId === instance.id ? " *" : ""
-									}`}
+									{`${focused ? ">" : " "} ${instance.name} [${instance.status}] ${basename(instance.directory)} (${counts.running}r/${counts.queued}q)`}
 								</text>
 							);
 						})
@@ -202,8 +183,7 @@ export function App({ onQuit }: AppProps) {
 
 			<box flexDirection="column" marginTop={1}>
 				<text attributes={TextAttributes.DIM}>
-					{error ??
-						"j/k or arrows: select  d: set default  r: refresh  q: quit"}
+					{error ?? "j/k or arrows: select  r: refresh  q: quit"}
 				</text>
 			</box>
 		</box>

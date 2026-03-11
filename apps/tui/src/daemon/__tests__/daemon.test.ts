@@ -58,7 +58,7 @@ describe("Daemon", () => {
 		await rm(tmpDir, { recursive: true, force: true });
 	});
 
-	test("creates the first instance as default", async () => {
+	test("creates an instance", async () => {
 		const response = await daemon.handleRequest(
 			req({
 				id: "instance-create",
@@ -71,19 +71,9 @@ describe("Daemon", () => {
 		);
 		const result = expectSuccess(response, "instance.create");
 		expect(result.instance.id).toBeTruthy();
-
-		const health = await daemon.handleRequest(
-			req({
-				id: "health-1",
-				method: "daemon.health",
-				params: {},
-			}),
-		);
-		const healthResult = expectSuccess(health, "daemon.health");
-		expect(healthResult.defaultInstanceId).toBe(result.instance.id);
 	});
 
-	test("submits a job against the default instance", async () => {
+	test("submits a job against a specific instance", async () => {
 		const created = await daemon.handleRequest(
 			req({
 				id: "instance-create",
@@ -94,12 +84,13 @@ describe("Daemon", () => {
 				},
 			}),
 		);
-		expectSuccess(created, "instance.create");
+		const instance = expectSuccess(created, "instance.create");
 		const submit = await daemon.handleRequest(
 			req({
 				id: "job-submit",
 				method: "job.submit",
 				params: {
+					instanceId: instance.instance.id,
 					session: { type: "new" },
 					task: {
 						type: "prompt",
@@ -109,15 +100,16 @@ describe("Daemon", () => {
 			}),
 		);
 		const result = expectSuccess(submit, "job.submit");
-		expect(result.job.instanceId).toBeTruthy();
+		expect(result.job.instanceId).toBe(instance.instance.id);
 	});
 
-	test("rejects submit without any configured instance", async () => {
+	test("rejects submit with nonexistent instance", async () => {
 		const submit = await daemon.handleRequest(
 			req({
 				id: "job-submit",
 				method: "job.submit",
 				params: {
+					instanceId: "nonexistent",
 					session: { type: "new" },
 					task: {
 						type: "prompt",
@@ -126,7 +118,7 @@ describe("Daemon", () => {
 				},
 			}),
 		);
-		expect(expectFailure(submit).error.code).toBe("instance_unavailable");
+		expect(expectFailure(submit).error.code).toBe("not_found");
 	});
 
 	test("runs jobs on different instances in parallel", async () => {
@@ -276,7 +268,6 @@ describe("Daemon", () => {
 	test("requeues running jobs after restart", async () => {
 		await store.save({
 			version: 2,
-			defaultInstanceId: "instance-1",
 			instances: [
 				{
 					id: "instance-1",

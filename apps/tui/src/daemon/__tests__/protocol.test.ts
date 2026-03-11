@@ -8,6 +8,7 @@ describe("protocol schemas", () => {
 			id: "req-1",
 			method: "job.submit",
 			params: {
+				instanceId: "instance-1",
 				session: { type: "new" },
 				task: {
 					type: "prompt",
@@ -24,6 +25,7 @@ describe("protocol schemas", () => {
 			id: "req-1",
 			method: "job.submit",
 			params: {
+				instanceId: "instance-1",
 				session: { type: "new" },
 				task: {
 					type: "prompt",

@@ -54,7 +54,6 @@ describe("Integration: server + client over Unix socket", () => {
 
 		const listed = await client.listInstances();
 		expect(listed.instances).toHaveLength(1);
-		expect(listed.defaultInstanceId).toBe(created.instance.id);
 	});
 
 	test("can submit and fetch jobs for a selected instance", async () => {

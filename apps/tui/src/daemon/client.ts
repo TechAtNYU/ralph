@@ -1,33 +1,58 @@
-import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { connect } from "node:net";
 
-import type {
-	CancelResult,
-	GetResult,
-	HealthResult,
-	ListResult,
-	RequestMessage,
-	ResponseMessage,
-	ShutdownResult,
-	SubmitResult,
+import {
+	type ParamsByMethod,
+	RequestMessage as RequestMessageSchema,
+	type RequestMethod,
+	type ResponseMessage,
+	ResponseMessage as ResponseMessageSchema,
+	type ResultByMethod,
+	SOCKET_PATH,
 } from "./protocol";
-import { SOCKET_PATH } from "./protocol";
 
-function send<T>(
+const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
+const HEALTHCHECK_TIMEOUT_MS = 500;
+
+function send<M extends RequestMethod>(
 	socketPath: string,
-	method: RequestMessage["method"],
-	params?: Record<string, unknown>,
-): Promise<T> {
-	const request: RequestMessage = {
-		id: randomUUID(),
+	method: M,
+	params: ParamsByMethod<M>,
+	timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+): Promise<unknown> {
+	const request = RequestMessageSchema.parse({
+		id: Bun.randomUUIDv7(),
 		method,
 		params,
-	};
+	});
 
-	return new Promise<T>((resolve, reject) => {
+	return new Promise<unknown>((resolve, reject) => {
 		const socket = connect(socketPath);
 		let buffer = "";
+		let settled = false;
+		const timeout = setTimeout(() => {
+			finish(
+				new Error(`daemon request timed out after ${timeoutMs}ms: ${method}`),
+			);
+		}, timeoutMs);
+
+		const finish = (error?: Error, result?: unknown) => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			clearTimeout(timeout);
+			socket.destroy();
+			if (error) {
+				reject(error);
+				return;
+			}
+			if (result === undefined) {
+				reject(new Error("daemon response missing result"));
+				return;
+			}
+			resolve(result);
+		};
 
 		socket.setEncoding("utf8");
 
@@ -45,32 +70,45 @@ function send<T>(
 					continue;
 				}
 
-				let response: ResponseMessage;
-				try {
-					response = JSON.parse(line) as ResponseMessage;
-				} catch {
-					reject(new Error("invalid daemon response"));
-					socket.destroy();
+				const parsed = parseResponse(line);
+				if (parsed instanceof Error) {
+					finish(parsed);
 					return;
 				}
 
-				if (response.id !== request.id) {
+				if (parsed.id !== request.id || parsed.method !== request.method) {
 					continue;
 				}
 
-				if (!response.ok) {
-					reject(new Error(response.error ?? "daemon request failed"));
-				} else {
-					resolve(response.result as T);
+				if (!parsed.ok) {
+					finish(new Error(parsed.error.message));
+					return;
 				}
-				socket.end();
+
+				finish(undefined, parsed.result);
+				return;
 			}
 		});
 
 		socket.on("error", (error) => {
-			reject(error);
+			finish(error instanceof Error ? error : new Error(String(error)));
 		});
 	});
+}
+
+function parseResponse(raw: string): ResponseMessage | Error {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw) as unknown;
+	} catch {
+		return new Error("invalid daemon response");
+	}
+
+	const response = ResponseMessageSchema.safeParse(parsed);
+	if (!response.success) {
+		return new Error("invalid daemon response");
+	}
+	return response.data;
 }
 
 export class DaemonClient {
@@ -79,45 +117,89 @@ export class DaemonClient {
 	async isDaemonRunning(): Promise<boolean> {
 		try {
 			await access(this.socketPath);
-			const result = await send<HealthResult>(this.socketPath, "health");
+			const result = (await send(
+				this.socketPath,
+				"daemon.health",
+				{},
+				HEALTHCHECK_TIMEOUT_MS,
+			)) as ResultByMethod<"daemon.health">;
 			return Boolean(result.pid);
 		} catch {
 			return false;
 		}
 	}
 
-	async health(): Promise<HealthResult> {
-		return send<HealthResult>(this.socketPath, "health");
+	health() {
+		return send(this.socketPath, "daemon.health", {}) as Promise<
+			ResultByMethod<"daemon.health">
+		>;
 	}
 
-	async submit(prompt: string): Promise<SubmitResult> {
-		return send<SubmitResult>(this.socketPath, "submit", { prompt });
+	shutdown() {
+		return send(this.socketPath, "daemon.shutdown", {}) as Promise<
+			ResultByMethod<"daemon.shutdown">
+		>;
 	}
 
-	async listJobs(): Promise<ListResult> {
-		return send<ListResult>(this.socketPath, "list");
+	createInstance(params: ParamsByMethod<"instance.create">) {
+		return send(this.socketPath, "instance.create", params) as Promise<
+			ResultByMethod<"instance.create">
+		>;
 	}
 
-	async getJob(jobId: string): Promise<GetResult> {
-		return send<GetResult>(this.socketPath, "get", { jobId });
+	listInstances() {
+		return send(this.socketPath, "instance.list", {}) as Promise<
+			ResultByMethod<"instance.list">
+		>;
 	}
 
-	async cancelJob(jobId: string): Promise<CancelResult> {
-		return send<CancelResult>(this.socketPath, "cancel", { jobId });
+	getInstance(instanceId: string) {
+		return send(this.socketPath, "instance.get", { instanceId }) as Promise<
+			ResultByMethod<"instance.get">
+		>;
 	}
 
-	async shutdown(): Promise<ShutdownResult> {
-		return send<ShutdownResult>(this.socketPath, "shutdown");
+	startInstance(instanceId: string) {
+		return send(this.socketPath, "instance.start", { instanceId }) as Promise<
+			ResultByMethod<"instance.start">
+		>;
+	}
+
+	stopInstance(instanceId: string) {
+		return send(this.socketPath, "instance.stop", { instanceId }) as Promise<
+			ResultByMethod<"instance.stop">
+		>;
+	}
+
+	removeInstance(instanceId: string) {
+		return send(this.socketPath, "instance.remove", { instanceId }) as Promise<
+			ResultByMethod<"instance.remove">
+		>;
+	}
+
+	submitJob(params: ParamsByMethod<"job.submit">) {
+		return send(this.socketPath, "job.submit", params) as Promise<
+			ResultByMethod<"job.submit">
+		>;
+	}
+
+	listJobs(params: ParamsByMethod<"job.list"> = {}) {
+		return send(this.socketPath, "job.list", params) as Promise<
+			ResultByMethod<"job.list">
+		>;
+	}
+
+	getJob(jobId: string) {
+		return send(this.socketPath, "job.get", { jobId }) as Promise<
+			ResultByMethod<"job.get">
+		>;
+	}
+
+	cancelJob(jobId: string) {
+		return send(this.socketPath, "job.cancel", { jobId }) as Promise<
+			ResultByMethod<"job.cancel">
+		>;
 	}
 }
 
-// Default client using the standard socket path — convenience for production callers.
-const defaultClient = new DaemonClient();
-
-export const isDaemonRunning = () => defaultClient.isDaemonRunning();
-export const health = () => defaultClient.health();
-export const submit = (prompt: string) => defaultClient.submit(prompt);
-export const listJobs = () => defaultClient.listJobs();
-export const getJob = (jobId: string) => defaultClient.getJob(jobId);
-export const cancelJob = (jobId: string) => defaultClient.cancelJob(jobId);
-export const shutdown = () => defaultClient.shutdown();
+export const daemon = new DaemonClient();

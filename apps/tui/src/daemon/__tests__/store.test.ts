@@ -71,8 +71,8 @@ describe("StateStore", () => {
 
 	test("adds and updates instances", () => {
 		let state: DaemonState = { version: 2, instances: [], jobs: [] };
-		state = store.createInstance(state, makeInstance(), true);
-		expect(state.defaultInstanceId).toBe("instance-1");
+		state = store.createInstance(state, makeInstance());
+		expect(state.instances).toHaveLength(1);
 		state = store.upsertInstance(
 			state,
 			makeInstance({
