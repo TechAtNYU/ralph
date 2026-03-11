@@ -26,8 +26,18 @@ function clampIndex(index: number, length: number): number {
 	return Math.min(Math.max(index, 0), length - 1);
 }
 
-function countJobs(jobs: DaemonJob[], state: DaemonJob["state"]): number {
-	return jobs.filter((job) => job.state === state).length;
+function countJobsByState(
+	jobs: DaemonJob[],
+	instanceId: string,
+): { running: number; queued: number } {
+	let running = 0;
+	let queued = 0;
+	for (const job of jobs) {
+		if (job.instanceId !== instanceId) continue;
+		if (job.state === "running") running++;
+		else if (job.state === "queued") queued++;
+	}
+	return { running, queued };
 }
 
 export function App({ onQuit }: AppProps) {
@@ -127,20 +137,7 @@ export function App({ onQuit }: AppProps) {
 					{data?.instances.length ? (
 						data.instances.map((instance: ManagedInstance, index: number) => {
 							const focused = index === selectedIndex;
-							const counts = {
-								running: countJobs(
-									data.jobs.filter(
-										(job: DaemonJob) => job.instanceId === instance.id,
-									),
-									"running",
-								),
-								queued: countJobs(
-									data.jobs.filter(
-										(job: DaemonJob) => job.instanceId === instance.id,
-									),
-									"queued",
-								),
-							};
+							const counts = countJobsByState(data.jobs, instance.id);
 							return (
 								<text
 									key={instance.id}

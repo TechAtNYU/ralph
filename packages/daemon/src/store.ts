@@ -15,14 +15,7 @@ const EMPTY_STATE: DaemonState = {
 	jobs: [],
 };
 
-function normalizePersistedState(parsed: unknown): unknown {
-	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-		return parsed;
-	}
-
-	const { ...state } = parsed;
-	return state;
-}
+const MAX_TERMINAL_JOBS = 100;
 
 export class StoreError extends Error {
 	constructor(
@@ -44,9 +37,7 @@ export class StateStore {
 		try {
 			const raw = await readFile(this.statePath, "utf8");
 			const parsed = JSON.parse(raw) as unknown;
-			const current = DaemonStateSchema.safeParse(
-				normalizePersistedState(parsed),
-			);
+			const current = DaemonStateSchema.safeParse(parsed);
 			if (current.success) {
 				return current.data;
 			}
@@ -195,5 +186,31 @@ export class StateStore {
 			throw new StoreError("not_found", `job ${jobId} not found`);
 		}
 		return job;
+	}
+
+	pruneTerminalJobs(state: DaemonState): DaemonState {
+		const terminalStates = new Set(["succeeded", "failed", "cancelled"]);
+		const active: DaemonJob[] = [];
+		const terminal: DaemonJob[] = [];
+
+		for (const job of state.jobs) {
+			if (terminalStates.has(job.state)) {
+				terminal.push(job);
+			} else {
+				active.push(job);
+			}
+		}
+
+		if (terminal.length <= MAX_TERMINAL_JOBS) {
+			return state;
+		}
+
+		// Jobs are already sorted newest-first by upsertJob
+		const kept = terminal.slice(0, MAX_TERMINAL_JOBS);
+		const jobs = [...active, ...kept].sort((a: DaemonJob, b: DaemonJob) =>
+			a.createdAt < b.createdAt ? 1 : -1,
+		);
+
+		return { ...state, jobs };
 	}
 }

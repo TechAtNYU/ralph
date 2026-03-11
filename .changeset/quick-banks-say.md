@@ -1,5 +1,4 @@
 ---
-"@techatnyu/ralphd": patch
 "@techatnyu/ralph": patch
 ---
 

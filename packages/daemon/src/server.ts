@@ -335,6 +335,18 @@ export class Daemon {
 		request: RequestByMethod<"job.cancel">,
 	): Promise<CancelResult> {
 		const job = this.store.assertJob(this.state, request.params.jobId);
+
+		if (
+			job.state === "succeeded" ||
+			job.state === "failed" ||
+			job.state === "cancelled"
+		) {
+			throw new StoreError(
+				"conflict",
+				`job ${job.id} is already in terminal state "${job.state}"`,
+			);
+		}
+
 		if (job.state === "queued") {
 			const queue = this.queues.get(job.instanceId);
 			if (queue) {
@@ -383,14 +395,18 @@ export class Daemon {
 		};
 		this.queues.clear();
 
-		for (const job of next.jobs) {
-			if (job.state === "running") {
-				job.state = "queued";
-				job.error = [job.error, "Recovered after daemon restart"]
-					.filter(Boolean)
-					.join(" ");
-				job.updatedAt = new Date().toISOString();
-			}
+		for (const original of next.jobs) {
+			const job: DaemonJob =
+				original.state === "running"
+					? {
+							...original,
+							state: "queued",
+							error: [original.error, "Recovered after daemon restart"]
+								.filter(Boolean)
+								.join(" "),
+							updatedAt: new Date().toISOString(),
+						}
+					: original;
 
 			next = this.store.upsertJob(next, job);
 			if (job.state === "queued" && job.instanceId) {
@@ -398,6 +414,7 @@ export class Daemon {
 			}
 		}
 
+		next = this.store.pruneTerminalJobs(next);
 		return next;
 	}
 
@@ -426,7 +443,19 @@ export class Daemon {
 
 		this.drainPromise = this.drainQueue().finally(() => {
 			this.drainPromise = undefined;
+			if (!this.shuttingDown && this.hasQueuedWork()) {
+				this.scheduleDrain();
+			}
 		});
+	}
+
+	private hasQueuedWork(): boolean {
+		for (const queue of this.queues.values()) {
+			if (queue.length > 0) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private dequeueNextJob(): DaemonJob | undefined {
@@ -753,6 +782,7 @@ async function canConnectToSocket(socketPath: string): Promise<boolean> {
 export function createConnectionHandler(daemon: Daemon) {
 	return (socket: Socket) => {
 		socket.setEncoding("utf8");
+		socket.on("error", () => {});
 		let buffer = "";
 
 		socket.on("data", (chunk) => {
@@ -816,7 +846,9 @@ export function createConnectionHandler(daemon: Daemon) {
 				}
 
 				void daemon.handleRequest(request.data).then((response) => {
-					socket.write(`${JSON.stringify(response)}\n`);
+					if (socket.writable) {
+						socket.write(`${JSON.stringify(response)}\n`);
+					}
 				});
 			}
 		});
