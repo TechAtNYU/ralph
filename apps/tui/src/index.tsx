@@ -1,16 +1,30 @@
-import { createCliRenderer, TextAttributes } from "@opentui/core";
+import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
+import { ensureDaemonRunning } from "@techatnyu/ralphd";
+import { App } from "./components/app";
 
-function App() {
-	return (
-		<box alignItems="center" justifyContent="center" flexGrow={1}>
-			<box justifyContent="center" alignItems="flex-end">
-				<ascii-font font="tiny" text="OpenTUI" />
-				<text attributes={TextAttributes.DIM}>What will you build?</text>
-			</box>
-		</box>
-	);
+export async function runTui(): Promise<void> {
+	const renderer = await createCliRenderer();
+	const root = createRoot(renderer);
+	const online = await ensureDaemonRunning();
+
+	if (!online) {
+		root.render(
+			<box alignItems="center" justifyContent="center" flexGrow={1}>
+				<text>Daemon offline. Start it with: `ralph daemon start`</text>
+			</box>,
+		);
+		return;
+	}
+
+	const close = () => {
+		root.unmount();
+		renderer.destroy();
+	};
+
+	root.render(<App onQuit={close} />);
 }
 
-const renderer = await createCliRenderer();
-createRoot(renderer).render(<App />);
+if (import.meta.main) {
+	void runTui();
+}

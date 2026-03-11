@@ -6,6 +6,7 @@
       "name": "ralph",
       "devDependencies": {
         "@biomejs/biome": "2.3.14",
+        "@changesets/changelog-git": "^0.2.1",
         "@changesets/cli": "^2.29.8",
         "turbo": "^2.8.3",
         "typescript": "5.9.2",
@@ -42,14 +43,18 @@
     },
     "apps/tui": {
       "name": "@techatnyu/ralph",
+      "version": "0.0.0",
       "dependencies": {
-        "@opencode-ai/sdk": "^1.2.10",
+        "@crustjs/core": "^0.0.13",
+        "@crustjs/plugins": "^0.0.16",
         "@opentui/core": "^0.1.77",
         "@opentui/react": "^0.1.77",
+        "@techatnyu/ralphd": "workspace:*",
         "react": "^19.2.4",
       },
       "devDependencies": {
         "@types/bun": "latest",
+        "@types/react": "^19.2.4",
       },
       "peerDependencies": {
         "typescript": "^5",
@@ -57,6 +62,20 @@
     },
     "packages/config": {
       "name": "@ralph/config",
+    },
+    "packages/daemon": {
+      "name": "@techatnyu/ralphd",
+      "version": "0.0.0",
+      "dependencies": {
+        "@opencode-ai/sdk": "^1.2.10",
+        "zod": "^4.3.6",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
     },
   },
   "catalog": {
@@ -158,6 +177,12 @@
     "@changesets/types": ["@changesets/types@6.1.0", "", {}, "sha512-rKQcJ+o1nKNgeoYRHKOS07tAMNd3YSN0uHaJOZYjBAgxfV7TUE7JE+z4BzZdQwb5hKaYbayKN5KrYV7ODb2rAA=="],
 
     "@changesets/write": ["@changesets/write@0.4.0", "", { "dependencies": { "@changesets/types": "^6.1.0", "fs-extra": "^7.0.1", "human-id": "^4.1.1", "prettier": "^2.7.1" } }, "sha512-CdTLvIOPiCNuH71pyDu3rA+Q0n65cmAbXnwWH84rKGiFumFzkmHNT8KHTMEchcxN+Kl8I54xGUhJ7l3E7X396Q=="],
+
+    "@crustjs/core": ["@crustjs/core@0.0.13", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-kAjSL68kjEdO68uGQVWn6RQwaFFx17skogokyTF3UutF7WZepMhzQ7Zhw4Q5joKrVZJjCcSkRkDYzb6bye/Rgg=="],
+
+    "@crustjs/plugins": ["@crustjs/plugins@0.0.16", "", { "dependencies": { "@crustjs/style": "0.0.5" }, "peerDependencies": { "@crustjs/core": "0.0.13", "typescript": "^5" } }, "sha512-Y3MuwpHxPEutEqBzpR8sLuG3z61BRPDiWDOQppw1M2xaEI/RTTfuYRVfPF58NGrcKSRFFDn8vfty+rUdkacnwg=="],
+
+    "@crustjs/style": ["@crustjs/style@0.0.5", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-KZhxi2iCMYEMihMDmOrHkC4gl5INtogR9AEfbOkjwot74cmNQ2vTUfiZsLmWzBQ23nhPQ0vBwZBNFN+IpH+F0w=="],
 
     "@dimforge/rapier2d-simd-compat": ["@dimforge/rapier2d-simd-compat@0.17.3", "", {}, "sha512-bijvwWz6NHsNj5e5i1vtd3dU2pDhthSaTUZSh14DUGGKJfw8eMnlWZsxwHBxB/a3AXVNDjL9abuHw1k9FGR+jg=="],
 
@@ -546,6 +571,8 @@
     "@tanstack/virtual-file-routes": ["@tanstack/virtual-file-routes@1.154.7", "", {}, "sha512-cHHDnewHozgjpI+MIVp9tcib6lYEQK5MyUr0ChHpHFGBl8Xei55rohFK0I0ve/GKoHeioaK42Smd8OixPp6CTg=="],
 
     "@techatnyu/ralph": ["@techatnyu/ralph@workspace:apps/tui"],
+
+    "@techatnyu/ralphd": ["@techatnyu/ralphd@workspace:packages/daemon"],
 
     "@tokenizer/token": ["@tokenizer/token@0.3.0", "", {}, "sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A=="],
 

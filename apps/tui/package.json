@@ -1,20 +1,28 @@
 {
 	"name": "@techatnyu/ralph",
+	"version": "0.0.0",
 	"module": "src/index.tsx",
 	"type": "module",
-	"private": true,
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	},
 	"scripts": {
-		"dev": "bun run --watch src/index.tsx",
+		"dev": "RALPH_HOME=../../.ralph-dev bun run src/cli.ts",
+		"test": "bun test",
 		"check:types": "tsc --noEmit"
 	},
 	"devDependencies": {
-		"@types/bun": "latest"
+		"@types/bun": "latest",
+		"@types/react": "^19.2.4"
 	},
 	"peerDependencies": {
 		"typescript": "^5"
 	},
 	"dependencies": {
-		"@opencode-ai/sdk": "^1.2.10",
+		"@techatnyu/ralphd": "workspace:*",
+		"@crustjs/core": "^0.0.13",
+		"@crustjs/plugins": "^0.0.16",
 		"@opentui/core": "^0.1.77",
 		"@opentui/react": "^0.1.77",
 		"react": "^19.2.4"
