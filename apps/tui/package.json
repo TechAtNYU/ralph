@@ -8,7 +8,6 @@
 		"access": "public"
 	},
 	"scripts": {
-		"build": "bun run ../../scripts/release/build-binaries.ts --current",
 		"dev": "bun run src/cli.ts",
 		"test": "bun test",
 		"check:types": "tsc --noEmit"
