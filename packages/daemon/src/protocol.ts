@@ -1,7 +1,7 @@
-import { homedir } from "node:os";
 import { z } from "zod";
+import { SOCKET_PATH } from "./paths";
 
-export const SOCKET_PATH = `${homedir()}/.ralph/ralphd.sock`;
+export { SOCKET_PATH } from "./paths";
 
 const IsoDateTime = z.iso.datetime();
 

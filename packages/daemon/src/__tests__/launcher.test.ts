@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	resolveDaemonLaunchSpec,
 	resolveSiblingDaemonPath,
+	shouldAutoStartDaemon,
 } from "../launcher";
 
 describe("launcher", () => {
@@ -37,5 +38,21 @@ describe("launcher", () => {
 			"run",
 			"/repo/packages/daemon/src/bin/ralphd.ts",
 		]);
+	});
+
+	test("does not auto-start the daemon in source mode", () => {
+		expect(
+			shouldAutoStartDaemon({
+				execPath: "/usr/local/bin/bun",
+				sourceDir: "/repo/packages/daemon/src",
+				env: {},
+			}),
+		).toBe(false);
+		expect(
+			shouldAutoStartDaemon({
+				execPath: "/usr/local/bin/ralph",
+				env: {},
+			}),
+		).toBe(true);
 	});
 });

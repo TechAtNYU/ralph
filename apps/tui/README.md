@@ -4,6 +4,10 @@ This app uses a local daemon (`ralphd`) for long-running loop jobs.
 
 End users should normally run `ralph`. The TUI will start `ralphd` when needed.
 
+In local development, run `bun run dev` from the repo root. Turborepo will run
+the TUI and daemon together, and the TUI will wait for the foreground daemon
+instead of spawning a detached background process.
+
 ## Advanced daemon control
 
 ```bash

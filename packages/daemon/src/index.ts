@@ -4,6 +4,7 @@ export {
 	resolveDaemonLaunchSpec,
 	resolveSiblingDaemonPath,
 	runForegroundDaemon,
+	shouldAutoStartDaemon,
 	startDetached,
 	stopDaemon,
 	waitUntilReady,
@@ -16,5 +17,6 @@ export {
 	runDaemonServer,
 } from "./server";
 export * from "./opencode";
+export * from "./paths";
 export * from "./protocol";
 export * from "./store";

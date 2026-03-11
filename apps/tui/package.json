@@ -8,7 +8,7 @@
 		"access": "public"
 	},
 	"scripts": {
-		"dev": "bun run src/cli.ts",
+		"dev": "RALPH_HOME=../../.ralph-dev bun run src/cli.ts",
 		"test": "bun test",
 		"check:types": "tsc --noEmit"
 	},

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { access, chmod, mkdir, rm } from "node:fs/promises";
 import { connect, createServer, type Socket } from "node:net";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Part } from "@opencode-ai/sdk/v2";
 import { z } from "zod";
@@ -34,13 +33,10 @@ import {
 	type ResponseMessage,
 	type ResultByMethod,
 	type ShutdownResult,
-	SOCKET_PATH,
 	type SubmitResult,
 } from "./protocol";
+import { RALPH_HOME, SOCKET_PATH, STATE_PATH } from "./paths";
 import { StateStore, StoreError } from "./store";
-
-const RALPH_HOME = join(homedir(), ".ralph");
-const STATE_PATH = join(RALPH_HOME, "state.json");
 const CONCURRENCY = Number.parseInt(
 	process.env.RALPHD_MAX_CONCURRENCY ?? "4",
 	10,

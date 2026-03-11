@@ -11,6 +11,10 @@ export interface DaemonLaunchSpec {
 	mode: "override" | "packaged" | "source";
 }
 
+interface EnsureDaemonRunningOptions {
+	allowSourceAutostart?: boolean;
+}
+
 interface ResolveDaemonLaunchSpecOptions {
 	env?: NodeJS.ProcessEnv;
 	execPath?: string;
@@ -67,6 +71,12 @@ export function resolveDaemonLaunchSpec(
 		args: ["run", daemonPath],
 		daemonPath,
 	};
+}
+
+export function shouldAutoStartDaemon(
+	options: ResolveDaemonLaunchSpecOptions = {},
+): boolean {
+	return resolveDaemonLaunchSpec(options).mode !== "source";
 }
 
 async function assertDaemonBinaryExists(launch: DaemonLaunchSpec): Promise<void> {
@@ -145,9 +155,15 @@ export async function waitUntilReady(timeoutMs = 3000): Promise<boolean> {
  * Ensure the daemon is running. If not, start it and wait for readiness.
  * Returns true if the daemon is online.
  */
-export async function ensureDaemonRunning(): Promise<boolean> {
+export async function ensureDaemonRunning(
+	options: EnsureDaemonRunningOptions = {},
+): Promise<boolean> {
 	if (await daemon.isDaemonRunning()) {
 		return true;
+	}
+
+	if (!options.allowSourceAutostart && !shouldAutoStartDaemon()) {
+		return waitUntilReady();
 	}
 
 	try {

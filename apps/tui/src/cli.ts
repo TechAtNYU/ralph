@@ -5,7 +5,9 @@ import { daemon } from "@techatnyu/ralphd/client";
 import {
 	ensureDaemonRunning,
 	runForegroundDaemon,
+	startDetached,
 	stopDaemon,
+	waitUntilReady,
 } from "@techatnyu/ralphd/launcher";
 import { JobState } from "@techatnyu/ralphd/protocol";
 import { runTui } from "./index";
@@ -60,7 +62,8 @@ const cli = new Crust("ralph")
 							return;
 						}
 
-						const ok = await ensureDaemonRunning();
+						await startDetached();
+						const ok = await waitUntilReady();
 						if (!ok) {
 							throw new Error("Failed to start ralphd");
 						}
