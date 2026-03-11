@@ -1,14 +1,13 @@
 import { Crust } from "@crustjs/core";
 import { helpPlugin } from "@crustjs/plugins";
-
-import { daemon } from "@techatnyu/ralphd/client";
 import {
+	daemon,
+	JobState,
 	runForegroundDaemon,
 	startDetached,
 	stopDaemon,
 	waitUntilReady,
-} from "@techatnyu/ralphd/launcher";
-import { JobState } from "@techatnyu/ralphd/protocol";
+} from "@techatnyu/ralphd";
 import { runTui } from "./index";
 
 async function requireDaemon(): Promise<void> {
@@ -16,6 +15,15 @@ async function requireDaemon(): Promise<void> {
 	if (!running) {
 		throw new Error("ralphd is not running. Start it with: ralph daemon start");
 	}
+}
+
+function withDaemon<T>(
+	handler: (ctx: T) => void | Promise<void>,
+): (ctx: T) => Promise<void> {
+	return async (ctx: T) => {
+		await requireDaemon();
+		await handler(ctx);
+	};
 }
 
 function printJson(value: unknown): void {
@@ -34,7 +42,7 @@ function parseJobState(value: string | undefined) {
 }
 
 const cli = new Crust("ralph")
-	.meta({ description: "Ralph — AI loop runner" })
+	.meta({ description: "Coding Agent Ochestration TUI" })
 	.use(helpPlugin())
 	.run(async () => {
 		await runTui();
@@ -78,10 +86,9 @@ const cli = new Crust("ralph")
 				}),
 			)
 			.command("health", (cmd) =>
-				cmd.meta({ description: "Show daemon health status" }).run(async () => {
-					await requireDaemon();
+				cmd.meta({ description: "Show daemon health status" }).run(withDaemon(async () => {
 					printJson(await daemon.health());
-				}),
+				})),
 			)
 			.command("submit", (cmd) =>
 				cmd
@@ -106,8 +113,7 @@ const cli = new Crust("ralph")
 							description: "Existing session ID",
 						},
 					})
-					.run(async ({ args, flags }) => {
-						await requireDaemon();
+					.run(withDaemon(async ({ args, flags }) => {
 						const prompt = args.prompt.join(" ").trim();
 						const result = await daemon.submitJob({
 							instanceId: flags.instance,
@@ -120,7 +126,7 @@ const cli = new Crust("ralph")
 							},
 						});
 						printJson(result);
-					}),
+					})),
 			)
 			.command("list", (cmd) =>
 				cmd
@@ -135,15 +141,14 @@ const cli = new Crust("ralph")
 							description: "Filter by job state",
 						},
 					})
-					.run(async ({ flags }) => {
-						await requireDaemon();
+					.run(withDaemon(async ({ flags }) => {
 						printJson(
 							await daemon.listJobs({
 								instanceId: flags.instance,
 								state: parseJobState(flags.state),
 							}),
 						);
-					}),
+					})),
 			)
 			.command("get", (cmd) =>
 				cmd
@@ -156,10 +161,9 @@ const cli = new Crust("ralph")
 							description: "The job ID",
 						},
 					])
-					.run(async ({ args }) => {
-						await requireDaemon();
+					.run(withDaemon(async ({ args }) => {
 						printJson(await daemon.getJob(args.jobId));
-					}),
+					})),
 			)
 			.command("cancel", (cmd) =>
 				cmd
@@ -172,10 +176,9 @@ const cli = new Crust("ralph")
 							description: "The job ID",
 						},
 					])
-					.run(async ({ args }) => {
-						await requireDaemon();
+					.run(withDaemon(async ({ args }) => {
 						printJson(await daemon.cancelJob(args.jobId));
-					}),
+					})),
 			)
 			.command("instance", (instanceCommand) =>
 				instanceCommand
@@ -202,8 +205,7 @@ const cli = new Crust("ralph")
 									description: "Per-instance concurrency",
 								},
 							})
-							.run(async ({ args, flags }) => {
-								await requireDaemon();
+							.run(withDaemon(async ({ args, flags }) => {
 								printJson(
 									await daemon.createInstance({
 										name: args.name,
@@ -211,15 +213,14 @@ const cli = new Crust("ralph")
 										maxConcurrency: flags["max-concurrency"],
 									}),
 								);
-							}),
+							})),
 					)
 					.command("list", (cmd) =>
 						cmd
 							.meta({ description: "List registered instances" })
-							.run(async () => {
-								await requireDaemon();
+							.run(withDaemon(async () => {
 								printJson(await daemon.listInstances());
-							}),
+							})),
 					)
 					.command("get", (cmd) =>
 						cmd
@@ -232,10 +233,9 @@ const cli = new Crust("ralph")
 									description: "Instance ID",
 								},
 							])
-							.run(async ({ args }) => {
-								await requireDaemon();
+							.run(withDaemon(async ({ args }) => {
 								printJson(await daemon.getInstance(args.instanceId));
-							}),
+							})),
 					)
 					.command("start", (cmd) =>
 						cmd
@@ -248,10 +248,9 @@ const cli = new Crust("ralph")
 									description: "Instance ID",
 								},
 							])
-							.run(async ({ args }) => {
-								await requireDaemon();
+							.run(withDaemon(async ({ args }) => {
 								printJson(await daemon.startInstance(args.instanceId));
-							}),
+							})),
 					)
 					.command("stop", (cmd) =>
 						cmd
@@ -264,10 +263,9 @@ const cli = new Crust("ralph")
 									description: "Instance ID",
 								},
 							])
-							.run(async ({ args }) => {
-								await requireDaemon();
+							.run(withDaemon(async ({ args }) => {
 								printJson(await daemon.stopInstance(args.instanceId));
-							}),
+							})),
 					)
 					.command("remove", (cmd) =>
 						cmd
@@ -280,10 +278,9 @@ const cli = new Crust("ralph")
 									description: "Instance ID",
 								},
 							])
-							.run(async ({ args }) => {
-								await requireDaemon();
+							.run(withDaemon(async ({ args }) => {
 								printJson(await daemon.removeInstance(args.instanceId));
-							}),
+							})),
 					),
 			),
 	);

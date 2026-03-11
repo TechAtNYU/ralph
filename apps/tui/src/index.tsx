@@ -1,6 +1,6 @@
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { ensureDaemonRunning } from "@techatnyu/ralphd/launcher";
+import { ensureDaemonRunning } from "@techatnyu/ralphd";
 import { App } from "./components/app";
 
 export async function runTui(): Promise<void> {

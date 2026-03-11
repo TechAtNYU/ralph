@@ -4,13 +4,12 @@ import { connect, createServer, type Socket } from "node:net";
 import { dirname } from "node:path";
 import type { Part } from "@opencode-ai/sdk/v2";
 import { z } from "zod";
-
+import { RALPH_HOME, SOCKET_PATH, STATE_PATH } from "./env";
 import {
 	type ManagedOpencodeRuntime,
 	OpencodeRegistry,
 	type OpencodeRuntimeManager,
 } from "./opencode";
-import { RALPH_HOME, SOCKET_PATH, STATE_PATH } from "./paths";
 import {
 	type CancelResult,
 	type DaemonJob,

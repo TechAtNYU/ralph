@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export { SOCKET_PATH } from "./paths";
+export { SOCKET_PATH } from "./env";
 
 const IsoDateTime = z.iso.datetime();
 

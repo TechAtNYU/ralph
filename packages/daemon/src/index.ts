@@ -1,4 +1,5 @@
 export { DaemonClient, daemon } from "./client";
+export * from "./env";
 export {
 	ensureDaemonRunning,
 	resolveDaemonLaunchSpec,
@@ -10,7 +11,6 @@ export {
 	waitUntilReady,
 } from "./launcher";
 export * from "./opencode";
-export * from "./paths";
 export * from "./protocol";
 export {
 	clearStaleSocket,

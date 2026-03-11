@@ -4,12 +4,7 @@
 	"type": "module",
 	"private": true,
 	"exports": {
-		".": "./src/index.ts",
-		"./client": "./src/client.ts",
-		"./paths": "./src/paths.ts",
-		"./protocol": "./src/protocol.ts",
-		"./launcher": "./src/launcher.ts",
-		"./server": "./src/server.ts"
+		".": "./src/index.ts"
 	},
 	"scripts": {
 		"dev": "RALPH_HOME=../../.ralph-dev bun run src/bin/ralphd.ts",
