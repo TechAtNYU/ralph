@@ -8,6 +8,7 @@
 		"test": "turbo run test",
 		"check": "biome check",
 		"check:types": "turbo run check:types",
+		"version:packages": "changeset version",
 		"release:build": "bun run scripts/release/build-binaries.ts",
 		"release:stage": "bun run scripts/release/stage-npm.ts",
 		"release:publish": "bun run scripts/release/publish-npm.ts",
