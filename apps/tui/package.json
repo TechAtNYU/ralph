@@ -5,8 +5,6 @@
 	"private": true,
 	"scripts": {
 		"dev": "bun run src/cli.ts",
-		"build": "bun build src/cli.ts --compile --target=bun --minify --outfile dist/ralph",
-		"start": "bun run dist/ralph",
 		"test": "bun test",
 		"check:types": "tsc --noEmit"
 	},
