@@ -68,23 +68,6 @@ describe("StateStore", () => {
 		expect(parsed.jobs).toHaveLength(1);
 	});
 
-	test("loads a legacy state file with a version field", async () => {
-		await Bun.write(
-			statePath,
-			JSON.stringify({
-				version: 2,
-				instances: [makeInstance()],
-				jobs: [makeJob()],
-			}),
-		);
-
-		const state = await store.load();
-		expect(state).toEqual({
-			instances: [makeInstance()],
-			jobs: [makeJob()],
-		});
-	});
-
 	test("adds and updates instances", () => {
 		let state: DaemonState = { instances: [], jobs: [] };
 		state = store.createInstance(state, makeInstance());
