@@ -6,6 +6,7 @@
       "name": "ralph",
       "devDependencies": {
         "@biomejs/biome": "2.3.14",
+        "@changesets/changelog-git": "^0.2.1",
         "@changesets/cli": "^2.29.8",
         "turbo": "^2.8.3",
         "typescript": "5.9.2",
