@@ -2,9 +2,13 @@ import { z } from "zod";
 
 export { SOCKET_PATH } from "./env";
 
+// ---------------------------------------------------------------------------
+// Shared primitives
+// ---------------------------------------------------------------------------
+
 const IsoDateTime = z.iso.datetime();
 
-export const JobState = z.enum([
+const JobState = z.enum([
 	"queued",
 	"running",
 	"succeeded",
@@ -13,15 +17,15 @@ export const JobState = z.enum([
 ]);
 export type JobState = z.infer<typeof JobState>;
 
-export const InstanceStatus = z.enum([
-	"stopped",
-	"starting",
-	"running",
-	"error",
-]);
+const InstanceStatus = z.enum(["stopped", "starting", "running", "error"]);
 export type InstanceStatus = z.infer<typeof InstanceStatus>;
 
-export const ModelRef = z
+// ---------------------------------------------------------------------------
+// Domain models — core entities referenced by requests and responses
+// ---------------------------------------------------------------------------
+
+/** Which provider + model a job task should target. */
+const ModelRef = z
 	.strictObject({
 		providerId: z.string().min(1),
 		modelId: z.string().min(1),
@@ -29,7 +33,8 @@ export const ModelRef = z
 	.meta({ description: "Model selection for a job task" });
 export type ModelRef = z.infer<typeof ModelRef>;
 
-export const JobTask = z.discriminatedUnion("type", [
+/** The unit of work inside a job (currently only "prompt"). */
+const JobTask = z.discriminatedUnion("type", [
 	z.strictObject({
 		type: z.literal("prompt"),
 		prompt: z.string().min(1),
@@ -41,7 +46,8 @@ export const JobTask = z.discriminatedUnion("type", [
 ]);
 export type JobTask = z.infer<typeof JobTask>;
 
-export const JobSession = z.discriminatedUnion("type", [
+/** Whether the job starts a new conversation or continues an existing one. */
+const JobSession = z.discriminatedUnion("type", [
 	z.strictObject({
 		type: z.literal("new"),
 		title: z.string().min(1).optional(),
@@ -53,7 +59,8 @@ export const JobSession = z.discriminatedUnion("type", [
 ]);
 export type JobSession = z.infer<typeof JobSession>;
 
-export const ManagedInstance = z.strictObject({
+/** A registered Claude Code instance the daemon manages. */
+const ManagedInstance = z.strictObject({
 	id: z.string().min(1),
 	name: z.string().min(1),
 	directory: z.string().min(1),
@@ -65,7 +72,8 @@ export const ManagedInstance = z.strictObject({
 });
 export type ManagedInstance = z.infer<typeof ManagedInstance>;
 
-export const DaemonJob = z.strictObject({
+/** A job that has been submitted to the daemon for execution. */
+const DaemonJob = z.strictObject({
 	id: z.string().min(1),
 	instanceId: z.string().min(1),
 	sessionId: z.string().min(1).optional(),
@@ -82,7 +90,74 @@ export const DaemonJob = z.strictObject({
 });
 export type DaemonJob = z.infer<typeof DaemonJob>;
 
-export const InstanceHealth = z.strictObject({
+// ---------------------------------------------------------------------------
+// Request params — per-method input payloads
+// ---------------------------------------------------------------------------
+
+// Instance operations
+
+const InstanceCreateParams = z.strictObject({
+	name: z.string().min(1),
+	directory: z.string().min(1),
+	maxConcurrency: z.int().positive().optional(),
+});
+export type InstanceCreateParams = z.infer<typeof InstanceCreateParams>;
+
+const InstanceListParams = z.strictObject({});
+export type InstanceListParams = z.infer<typeof InstanceListParams>;
+
+const InstanceGetParams = z.strictObject({
+	instanceId: z.string().min(1),
+});
+export type InstanceGetParams = z.infer<typeof InstanceGetParams>;
+
+const InstanceStartParams = z.strictObject({
+	instanceId: z.string().min(1),
+});
+export type InstanceStartParams = z.infer<typeof InstanceStartParams>;
+
+const InstanceStopParams = z.strictObject({
+	instanceId: z.string().min(1),
+});
+export type InstanceStopParams = z.infer<typeof InstanceStopParams>;
+
+const InstanceRemoveParams = z.strictObject({
+	instanceId: z.string().min(1),
+});
+export type InstanceRemoveParams = z.infer<typeof InstanceRemoveParams>;
+
+// Job operations
+
+const JobSubmitParams = z.strictObject({
+	instanceId: z.string().min(1),
+	session: JobSession,
+	task: JobTask,
+});
+export type JobSubmitParams = z.infer<typeof JobSubmitParams>;
+
+const JobListParams = z.strictObject({
+	instanceId: z.string().min(1).optional(),
+	state: JobState.optional(),
+});
+export type JobListParams = z.infer<typeof JobListParams>;
+
+const JobGetParams = z.strictObject({
+	jobId: z.string().min(1),
+});
+export type JobGetParams = z.infer<typeof JobGetParams>;
+
+const JobCancelParams = z.strictObject({
+	jobId: z.string().min(1),
+});
+export type JobCancelParams = z.infer<typeof JobCancelParams>;
+
+// ---------------------------------------------------------------------------
+// Result schemas — per-method response payloads (success path)
+// ---------------------------------------------------------------------------
+
+// Daemon-level results
+
+const InstanceHealth = z.strictObject({
 	instanceId: z.string().min(1),
 	name: z.string().min(1),
 	status: InstanceStatus,
@@ -93,7 +168,7 @@ export const InstanceHealth = z.strictObject({
 });
 export type InstanceHealth = z.infer<typeof InstanceHealth>;
 
-export const HealthResult = z.strictObject({
+const HealthResult = z.strictObject({
 	pid: z.int().nonnegative(),
 	uptimeSeconds: z.int().nonnegative(),
 	queued: z.int().nonnegative(),
@@ -103,93 +178,48 @@ export const HealthResult = z.strictObject({
 });
 export type HealthResult = z.infer<typeof HealthResult>;
 
-export const ShutdownResult = z.strictObject({
+const ShutdownResult = z.strictObject({
 	ok: z.literal(true),
 });
 export type ShutdownResult = z.infer<typeof ShutdownResult>;
 
-export const InstanceCreateParams = z.strictObject({
-	name: z.string().min(1),
-	directory: z.string().min(1),
-	maxConcurrency: z.int().positive().optional(),
-});
-export type InstanceCreateParams = z.infer<typeof InstanceCreateParams>;
+// Instance results
 
-export const InstanceListParams = z.strictObject({});
-export type InstanceListParams = z.infer<typeof InstanceListParams>;
-
-export const InstanceGetParams = z.strictObject({
-	instanceId: z.string().min(1),
-});
-export type InstanceGetParams = z.infer<typeof InstanceGetParams>;
-
-export const InstanceStartParams = z.strictObject({
-	instanceId: z.string().min(1),
-});
-export type InstanceStartParams = z.infer<typeof InstanceStartParams>;
-
-export const InstanceStopParams = z.strictObject({
-	instanceId: z.string().min(1),
-});
-export type InstanceStopParams = z.infer<typeof InstanceStopParams>;
-
-export const InstanceRemoveParams = z.strictObject({
-	instanceId: z.string().min(1),
-});
-export type InstanceRemoveParams = z.infer<typeof InstanceRemoveParams>;
-
-export const JobSubmitParams = z.strictObject({
-	instanceId: z.string().min(1),
-	session: JobSession,
-	task: JobTask,
-});
-export type JobSubmitParams = z.infer<typeof JobSubmitParams>;
-
-export const JobListParams = z.strictObject({
-	instanceId: z.string().min(1).optional(),
-	state: JobState.optional(),
-});
-export type JobListParams = z.infer<typeof JobListParams>;
-
-export const JobGetParams = z.strictObject({
-	jobId: z.string().min(1),
-});
-export type JobGetParams = z.infer<typeof JobGetParams>;
-
-export const JobCancelParams = z.strictObject({
-	jobId: z.string().min(1),
-});
-export type JobCancelParams = z.infer<typeof JobCancelParams>;
-
-export const InstanceResult = z.strictObject({
+const InstanceResult = z.strictObject({
 	instance: ManagedInstance,
 });
 export type InstanceResult = z.infer<typeof InstanceResult>;
 
-export const InstanceListResult = z.strictObject({
+const InstanceListResult = z.strictObject({
 	instances: z.array(ManagedInstance),
 });
 export type InstanceListResult = z.infer<typeof InstanceListResult>;
 
-export const SubmitResult = z.strictObject({
+// Job results
+
+const SubmitResult = z.strictObject({
 	job: DaemonJob,
 });
 export type SubmitResult = z.infer<typeof SubmitResult>;
 
-export const ListResult = z.strictObject({
+const ListResult = z.strictObject({
 	jobs: z.array(DaemonJob),
 });
 export type ListResult = z.infer<typeof ListResult>;
 
-export const GetResult = z.strictObject({
+const GetResult = z.strictObject({
 	job: DaemonJob,
 });
 export type GetResult = z.infer<typeof GetResult>;
 
-export const CancelResult = z.strictObject({
+const CancelResult = z.strictObject({
 	job: DaemonJob,
 });
 export type CancelResult = z.infer<typeof CancelResult>;
+
+// ---------------------------------------------------------------------------
+// Error schema
+// ---------------------------------------------------------------------------
 
 export const ResponseError = z.strictObject({
 	code: z.enum([
@@ -214,7 +244,11 @@ export const ResponseError = z.strictObject({
 });
 export type ResponseError = z.infer<typeof ResponseError>;
 
-export const RequestMethod = z.enum([
+// ---------------------------------------------------------------------------
+// Request messages — each pairs a method literal with its params schema
+// ---------------------------------------------------------------------------
+
+const RequestMethod = z.enum([
 	"daemon.health",
 	"daemon.shutdown",
 	"instance.create",
@@ -230,90 +264,85 @@ export const RequestMethod = z.enum([
 ]);
 export type RequestMethod = z.infer<typeof RequestMethod>;
 
-export const DaemonHealthRequest = z.strictObject({
+// Daemon requests
+
+const DaemonHealthRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("daemon.health"),
 	params: z.strictObject({}),
 });
-export type DaemonHealthRequest = z.infer<typeof DaemonHealthRequest>;
 
-export const DaemonShutdownRequest = z.strictObject({
+const DaemonShutdownRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("daemon.shutdown"),
 	params: z.strictObject({}),
 });
-export type DaemonShutdownRequest = z.infer<typeof DaemonShutdownRequest>;
 
-export const InstanceCreateRequest = z.strictObject({
+// Instance requests
+
+const InstanceCreateRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("instance.create"),
 	params: InstanceCreateParams,
 });
-export type InstanceCreateRequest = z.infer<typeof InstanceCreateRequest>;
 
-export const InstanceListRequest = z.strictObject({
+const InstanceListRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("instance.list"),
 	params: InstanceListParams,
 });
-export type InstanceListRequest = z.infer<typeof InstanceListRequest>;
 
-export const InstanceGetRequest = z.strictObject({
+const InstanceGetRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("instance.get"),
 	params: InstanceGetParams,
 });
-export type InstanceGetRequest = z.infer<typeof InstanceGetRequest>;
 
-export const InstanceStartRequest = z.strictObject({
+const InstanceStartRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("instance.start"),
 	params: InstanceStartParams,
 });
-export type InstanceStartRequest = z.infer<typeof InstanceStartRequest>;
 
-export const InstanceStopRequest = z.strictObject({
+const InstanceStopRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("instance.stop"),
 	params: InstanceStopParams,
 });
-export type InstanceStopRequest = z.infer<typeof InstanceStopRequest>;
 
-export const InstanceRemoveRequest = z.strictObject({
+const InstanceRemoveRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("instance.remove"),
 	params: InstanceRemoveParams,
 });
-export type InstanceRemoveRequest = z.infer<typeof InstanceRemoveRequest>;
 
-export const JobSubmitRequest = z.strictObject({
+// Job requests
+
+const JobSubmitRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("job.submit"),
 	params: JobSubmitParams,
 });
-export type JobSubmitRequest = z.infer<typeof JobSubmitRequest>;
 
-export const JobListRequest = z.strictObject({
+const JobListRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("job.list"),
 	params: JobListParams,
 });
-export type JobListRequest = z.infer<typeof JobListRequest>;
 
-export const JobGetRequest = z.strictObject({
+const JobGetRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("job.get"),
 	params: JobGetParams,
 });
-export type JobGetRequest = z.infer<typeof JobGetRequest>;
 
-export const JobCancelRequest = z.strictObject({
+const JobCancelRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("job.cancel"),
 	params: JobCancelParams,
 });
-export type JobCancelRequest = z.infer<typeof JobCancelRequest>;
 
+/** Union of every valid request the daemon accepts. */
 export const RequestMessage = z.discriminatedUnion("method", [
 	DaemonHealthRequest,
 	DaemonShutdownRequest,
@@ -330,103 +359,103 @@ export const RequestMessage = z.discriminatedUnion("method", [
 ]);
 export type RequestMessage = z.infer<typeof RequestMessage>;
 
-export const DaemonHealthSuccess = z.strictObject({
+// ---------------------------------------------------------------------------
+// Success responses — each pairs a method literal with its result schema
+// ---------------------------------------------------------------------------
+
+// Daemon successes
+
+const DaemonHealthSuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("daemon.health"),
 	ok: z.literal(true),
 	result: HealthResult,
 });
-export type DaemonHealthSuccess = z.infer<typeof DaemonHealthSuccess>;
 
-export const DaemonShutdownSuccess = z.strictObject({
+const DaemonShutdownSuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("daemon.shutdown"),
 	ok: z.literal(true),
 	result: ShutdownResult,
 });
-export type DaemonShutdownSuccess = z.infer<typeof DaemonShutdownSuccess>;
 
-export const InstanceCreateSuccess = z.strictObject({
+// Instance successes
+
+const InstanceCreateSuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("instance.create"),
 	ok: z.literal(true),
 	result: InstanceResult,
 });
-export type InstanceCreateSuccess = z.infer<typeof InstanceCreateSuccess>;
 
-export const InstanceListSuccess = z.strictObject({
+const InstanceListSuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("instance.list"),
 	ok: z.literal(true),
 	result: InstanceListResult,
 });
-export type InstanceListSuccess = z.infer<typeof InstanceListSuccess>;
 
-export const InstanceGetSuccess = z.strictObject({
+const InstanceGetSuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("instance.get"),
 	ok: z.literal(true),
 	result: InstanceResult,
 });
-export type InstanceGetSuccess = z.infer<typeof InstanceGetSuccess>;
 
-export const InstanceStartSuccess = z.strictObject({
+const InstanceStartSuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("instance.start"),
 	ok: z.literal(true),
 	result: InstanceResult,
 });
-export type InstanceStartSuccess = z.infer<typeof InstanceStartSuccess>;
 
-export const InstanceStopSuccess = z.strictObject({
+const InstanceStopSuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("instance.stop"),
 	ok: z.literal(true),
 	result: InstanceResult,
 });
-export type InstanceStopSuccess = z.infer<typeof InstanceStopSuccess>;
 
-export const InstanceRemoveSuccess = z.strictObject({
+const InstanceRemoveSuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("instance.remove"),
 	ok: z.literal(true),
 	result: InstanceResult,
 });
-export type InstanceRemoveSuccess = z.infer<typeof InstanceRemoveSuccess>;
 
-export const JobSubmitSuccess = z.strictObject({
+// Job successes
+
+const JobSubmitSuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("job.submit"),
 	ok: z.literal(true),
 	result: SubmitResult,
 });
-export type JobSubmitSuccess = z.infer<typeof JobSubmitSuccess>;
 
-export const JobListSuccess = z.strictObject({
+const JobListSuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("job.list"),
 	ok: z.literal(true),
 	result: ListResult,
 });
-export type JobListSuccess = z.infer<typeof JobListSuccess>;
 
-export const JobGetSuccess = z.strictObject({
+const JobGetSuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("job.get"),
 	ok: z.literal(true),
 	result: GetResult,
 });
-export type JobGetSuccess = z.infer<typeof JobGetSuccess>;
 
-export const JobCancelSuccess = z.strictObject({
+const JobCancelSuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("job.cancel"),
 	ok: z.literal(true),
 	result: CancelResult,
 });
-export type JobCancelSuccess = z.infer<typeof JobCancelSuccess>;
 
-export const ErrorResponse = z.strictObject({
+// Error response
+
+const ErrorResponse = z.strictObject({
 	id: z.string().min(1),
 	method: z.union([RequestMethod, z.literal("unknown")]),
 	ok: z.literal(false),
@@ -434,6 +463,7 @@ export const ErrorResponse = z.strictObject({
 });
 export type ErrorResponse = z.infer<typeof ErrorResponse>;
 
+/** Union of every possible response (success for each method + error). */
 export const ResponseMessage = z.union([
 	DaemonHealthSuccess,
 	DaemonShutdownSuccess,
@@ -451,11 +481,19 @@ export const ResponseMessage = z.union([
 ]);
 export type ResponseMessage = z.infer<typeof ResponseMessage>;
 
+// ---------------------------------------------------------------------------
+// Daemon persisted state
+// ---------------------------------------------------------------------------
+
 export const DaemonState = z.strictObject({
 	instances: z.array(ManagedInstance),
 	jobs: z.array(DaemonJob),
 });
 export type DaemonState = z.infer<typeof DaemonState>;
+
+// ---------------------------------------------------------------------------
+// Utility types — type-level helpers for method-based dispatch
+// ---------------------------------------------------------------------------
 
 export type RequestByMethod<M extends RequestMethod> = Extract<
 	RequestMessage,
@@ -469,6 +507,10 @@ export type ParamsByMethod<M extends RequestMethod> =
 	RequestByMethod<M>["params"];
 export type ResultByMethod<M extends RequestMethod> =
 	SuccessByMethod<M>["result"];
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 export function normalizeIssues(error: z.ZodError): ResponseError["issues"] {
 	return error.issues.map((issue: z.ZodIssue) => ({
