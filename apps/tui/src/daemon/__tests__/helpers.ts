@@ -1,7 +1,7 @@
 import type {
 	ManagedOpencodeRuntime,
 	OpencodeRuntimeManager,
-} from "../opencode-registry";
+} from "../opencode";
 
 export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 	private readonly runtimes = new Map<string, ManagedOpencodeRuntime>();

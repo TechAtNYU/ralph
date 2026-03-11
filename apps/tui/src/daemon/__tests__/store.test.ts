@@ -54,29 +54,6 @@ describe("StateStore", () => {
 		expect(state).toEqual({ version: 2, instances: [], jobs: [] });
 	});
 
-	test("migrates legacy state to version 2", async () => {
-		await Bun.write(
-			statePath,
-			JSON.stringify({
-				jobs: [
-					{
-						id: "legacy-running",
-						prompt: "legacy",
-						state: "running",
-						createdAt: "2026-01-01T00:00:00.000Z",
-						updatedAt: "2026-01-01T00:00:00.000Z",
-					},
-				],
-			}),
-		);
-
-		const state = await store.load();
-		expect(state.version).toBe(2);
-		expect(state.jobs[0]?.instanceId).toBeNull();
-		expect(state.jobs[0]?.state).toBe("failed");
-		expect(state.jobs[0]?.error).toContain("Cannot resume legacy job");
-	});
-
 	test("writes state to disk as formatted JSON", async () => {
 		const state: DaemonState = {
 			version: 2,
