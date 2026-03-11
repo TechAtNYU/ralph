@@ -3,6 +3,7 @@ import { access } from "node:fs/promises";
 import { dirname, join, posix, win32 } from "node:path";
 
 import { daemon } from "./client";
+import { resolveDaemonLauncherEnv } from "./env";
 
 export interface DaemonLaunchSpec {
 	command: string;
@@ -42,16 +43,15 @@ export function resolveSiblingDaemonPath(execPath: string = process.execPath) {
 export function resolveDaemonLaunchSpec(
 	options: ResolveDaemonLaunchSpecOptions = {},
 ): DaemonLaunchSpec {
-	const env = options.env ?? process.env;
 	const execPath = options.execPath ?? process.execPath;
 	const sourceDir = options.sourceDir ?? import.meta.dir;
-	const override = env.RALPHD_BIN?.trim();
-	if (override) {
+	const { daemonBinOverride } = resolveDaemonLauncherEnv(options.env);
+	if (daemonBinOverride) {
 		return {
 			mode: "override",
-			command: override,
+			command: daemonBinOverride,
 			args: [],
-			daemonPath: override,
+			daemonPath: daemonBinOverride,
 		};
 	}
 

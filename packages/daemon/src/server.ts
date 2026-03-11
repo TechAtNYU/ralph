@@ -4,7 +4,10 @@ import { connect, createServer, type Socket } from "node:net";
 import { dirname } from "node:path";
 import type { Part } from "@opencode-ai/sdk/v2";
 import { z } from "zod";
-import { RALPH_HOME, SOCKET_PATH, STATE_PATH } from "./env";
+import {
+	resolveDaemonRuntimeEnv,
+	SOCKET_PATH,
+} from "./env";
 import {
 	type ManagedOpencodeRuntime,
 	OpencodeRegistry,
@@ -37,11 +40,6 @@ import {
 } from "./protocol";
 import { StateStore, StoreError } from "./store";
 
-const CONCURRENCY = Number.parseInt(
-	process.env.RALPHD_MAX_CONCURRENCY ?? "4",
-	10,
-);
-
 interface RunningJob {
 	controller: AbortController;
 	instanceId: string;
@@ -49,6 +47,7 @@ interface RunningJob {
 
 interface DaemonOptions {
 	registry?: OpencodeRuntimeManager;
+	maxConcurrency?: number;
 }
 
 function extractText(parts: Part[]): string {
@@ -99,12 +98,15 @@ export class Daemon {
 	private shuttingDown = false;
 	private shutdownPromise: Promise<void> | undefined;
 	private instanceCursor = 0;
+	private readonly maxConcurrency: number;
 
 	constructor(
 		private readonly store: StateStore,
 		options: DaemonOptions = {},
 	) {
 		this.registry = options.registry ?? new OpencodeRegistry();
+		this.maxConcurrency =
+			options.maxConcurrency ?? resolveDaemonRuntimeEnv().maxConcurrency;
 	}
 
 	setShutdownHandler(handler: () => void): void {
@@ -412,7 +414,10 @@ export class Daemon {
 	}
 
 	private async drainQueue(): Promise<void> {
-		while (!this.shuttingDown && this.runningJobs.size < CONCURRENCY) {
+		while (
+			!this.shuttingDown &&
+			this.runningJobs.size < this.maxConcurrency
+		) {
 			const job = this.dequeueNextJob();
 			if (!job) {
 				break;
@@ -707,13 +712,17 @@ export class Daemon {
 	}
 }
 
-export async function ensureSocketDir(): Promise<void> {
-	await mkdir(dirname(SOCKET_PATH), { recursive: true });
+export async function ensureSocketDir(
+	socketPath: string = SOCKET_PATH,
+): Promise<void> {
+	await mkdir(dirname(socketPath), { recursive: true });
 }
 
-export async function clearStaleSocket(): Promise<void> {
+export async function clearStaleSocket(
+	socketPath: string = SOCKET_PATH,
+): Promise<void> {
 	try {
-		await access(SOCKET_PATH);
+		await access(socketPath);
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
 			throw error;
@@ -721,11 +730,11 @@ export async function clearStaleSocket(): Promise<void> {
 		return;
 	}
 
-	if (await canConnectToSocket(SOCKET_PATH)) {
-		throw new Error(`ralphd is already running at ${SOCKET_PATH}`);
+	if (await canConnectToSocket(socketPath)) {
+		throw new Error(`ralphd is already running at ${socketPath}`);
 	}
 
-	await rm(SOCKET_PATH, { force: true });
+	await rm(socketPath, { force: true });
 }
 
 async function canConnectToSocket(socketPath: string): Promise<boolean> {
@@ -822,17 +831,20 @@ export function createConnectionHandler(daemon: Daemon) {
 }
 
 export async function runDaemonServer(): Promise<void> {
-	await mkdir(RALPH_HOME, { recursive: true });
-	await ensureSocketDir();
-	await clearStaleSocket();
+	const env = resolveDaemonRuntimeEnv();
+	await mkdir(env.ralphHome, { recursive: true });
+	await ensureSocketDir(env.socketPath);
+	await clearStaleSocket(env.socketPath);
 
-	const daemon = new Daemon(new StateStore(STATE_PATH));
+	const daemon = new Daemon(new StateStore(env.statePath), {
+		maxConcurrency: env.maxConcurrency,
+	});
 	await daemon.bootstrap();
 
 	const server = createServer(createConnectionHandler(daemon));
-	server.listen(SOCKET_PATH, async () => {
-		await chmod(SOCKET_PATH, 0o600);
-		process.stdout.write(`ralphd listening on ${SOCKET_PATH}\n`);
+	server.listen(env.socketPath, async () => {
+		await chmod(env.socketPath, 0o600);
+		process.stdout.write(`ralphd listening on ${env.socketPath}\n`);
 	});
 
 	let shutdownPromise: Promise<void> | undefined;
@@ -844,7 +856,7 @@ export async function runDaemonServer(): Promise<void> {
 		shutdownPromise = (async () => {
 			server.close();
 			await daemon.shutdown();
-			await rm(SOCKET_PATH, { force: true });
+			await rm(env.socketPath, { force: true });
 		})();
 
 		return shutdownPromise;
