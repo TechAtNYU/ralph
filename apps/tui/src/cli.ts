@@ -3,7 +3,6 @@ import { helpPlugin } from "@crustjs/plugins";
 
 import { daemon } from "@techatnyu/ralphd/client";
 import {
-	ensureDaemonRunning,
 	runForegroundDaemon,
 	startDetached,
 	stopDaemon,

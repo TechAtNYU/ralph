@@ -1,4 +1,4 @@
-export { daemon, DaemonClient } from "./client";
+export { DaemonClient, daemon } from "./client";
 export {
 	ensureDaemonRunning,
 	resolveDaemonLaunchSpec,
@@ -9,14 +9,14 @@ export {
 	stopDaemon,
 	waitUntilReady,
 } from "./launcher";
-export {
-	createConnectionHandler,
-	Daemon,
-	clearStaleSocket,
-	ensureSocketDir,
-	runDaemonServer,
-} from "./server";
 export * from "./opencode";
 export * from "./paths";
 export * from "./protocol";
+export {
+	clearStaleSocket,
+	createConnectionHandler,
+	Daemon,
+	ensureSocketDir,
+	runDaemonServer,
+} from "./server";
 export * from "./store";

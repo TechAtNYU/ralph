@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { SOCKET_PATH } from "./paths";
 
 export { SOCKET_PATH } from "./paths";
 

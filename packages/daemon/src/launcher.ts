@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
-import { basename, dirname, extname, join, posix, win32 } from "node:path";
+import { dirname, join, posix, win32 } from "node:path";
 
 import { daemon } from "./client";
 
@@ -34,7 +34,8 @@ function isSourceModeExecution(execPath: string): boolean {
 
 export function resolveSiblingDaemonPath(execPath: string = process.execPath) {
 	const pathApi = execPath.includes("\\") ? win32 : posix;
-	const suffix = pathApi.extname(execPath).toLowerCase() === ".exe" ? ".exe" : "";
+	const suffix =
+		pathApi.extname(execPath).toLowerCase() === ".exe" ? ".exe" : "";
 	return pathApi.join(pathApi.dirname(execPath), `ralphd${suffix}`);
 }
 
@@ -79,7 +80,9 @@ export function shouldAutoStartDaemon(
 	return resolveDaemonLaunchSpec(options).mode !== "source";
 }
 
-async function assertDaemonBinaryExists(launch: DaemonLaunchSpec): Promise<void> {
+async function assertDaemonBinaryExists(
+	launch: DaemonLaunchSpec,
+): Promise<void> {
 	if (launch.mode === "source") {
 		return;
 	}
@@ -103,9 +106,7 @@ export async function runForegroundDaemon(): Promise<void> {
 				return;
 			}
 			if ((code ?? 0) !== 0) {
-				rejectRun(
-					new Error(`ralphd exited with code ${code ?? 1}`),
-				);
+				rejectRun(new Error(`ralphd exited with code ${code ?? 1}`));
 				return;
 			}
 			resolveRun();
@@ -123,9 +124,7 @@ export async function startDetached(): Promise<void> {
 			detached: true,
 			windowsHide: true,
 			cwd:
-				launch.mode === "source"
-					? dirname(launch.daemonPath)
-					: process.cwd(),
+				launch.mode === "source" ? dirname(launch.daemonPath) : process.cwd(),
 		});
 
 		child.once("error", rejectStart);

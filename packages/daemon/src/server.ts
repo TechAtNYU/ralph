@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { access, chmod, mkdir, rm } from "node:fs/promises";
 import { connect, createServer, type Socket } from "node:net";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import type { Part } from "@opencode-ai/sdk/v2";
 import { z } from "zod";
 
@@ -10,6 +10,7 @@ import {
 	OpencodeRegistry,
 	type OpencodeRuntimeManager,
 } from "./opencode";
+import { RALPH_HOME, SOCKET_PATH, STATE_PATH } from "./paths";
 import {
 	type CancelResult,
 	type DaemonJob,
@@ -35,8 +36,8 @@ import {
 	type ShutdownResult,
 	type SubmitResult,
 } from "./protocol";
-import { RALPH_HOME, SOCKET_PATH, STATE_PATH } from "./paths";
 import { StateStore, StoreError } from "./store";
+
 const CONCURRENCY = Number.parseInt(
 	process.env.RALPHD_MAX_CONCURRENCY ?? "4",
 	10,

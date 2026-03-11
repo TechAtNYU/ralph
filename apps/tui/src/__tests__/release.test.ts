@@ -8,9 +8,9 @@ import {
 	getBinaryFilename,
 	getCurrentTarget,
 	getTargetSpec,
-	stageDistribution,
 	SUPPORTED_TARGETS,
 	type SupportedTarget,
+	stageDistribution,
 } from "../../../../scripts/release/shared";
 
 async function makeFakeCompiledOutputs(rootDir: string) {
@@ -63,7 +63,12 @@ describe("release packaging", () => {
 			for (const target of SUPPORTED_TARGETS) {
 				const spec = getTargetSpec(target);
 				await access(
-					join(stageDir, spec.stageDirName, "bin", getBinaryFilename("ralph", spec)),
+					join(
+						stageDir,
+						spec.stageDirName,
+						"bin",
+						getBinaryFilename("ralph", spec),
+					),
 				);
 				await access(
 					join(
@@ -80,7 +85,10 @@ describe("release packaging", () => {
 			) as { optionalDependencies: Record<string, string> };
 			expect(Object.keys(rootPackageJson.optionalDependencies)).toHaveLength(6);
 
-			const launcher = await readFile(join(stageDir, "root", "bin", "ralph"), "utf8");
+			const launcher = await readFile(
+				join(stageDir, "root", "bin", "ralph"),
+				"utf8",
+			);
 			expect(launcher).toContain("ralph-linux-x64");
 			expect(launcher).toContain("ralph-darwin-arm64");
 		} finally {
@@ -141,12 +149,15 @@ describe("release packaging", () => {
 				HOME: homeDir,
 			};
 
-			const help = Bun.spawn([installedBinPath(installDir, "ralph"), "--help"], {
-				cwd: installDir,
-				env,
-				stdout: "pipe",
-				stderr: "pipe",
-			});
+			const help = Bun.spawn(
+				[installedBinPath(installDir, "ralph"), "--help"],
+				{
+					cwd: installDir,
+					env,
+					stdout: "pipe",
+					stderr: "pipe",
+				},
+			);
 			expect(await help.exited).toBe(0);
 
 			const start = Bun.spawn(
@@ -170,7 +181,7 @@ describe("release packaging", () => {
 				},
 			);
 			expect(await health.exited).toBe(0);
-			expect(await new Response(health.stdout).text()).toContain("\"pid\"");
+			expect(await new Response(health.stdout).text()).toContain('"pid"');
 
 			const stop = Bun.spawn(
 				[installedBinPath(installDir, "ralph"), "daemon", "stop"],
