@@ -1,10 +1,13 @@
 import { Crust } from "@crustjs/core";
 import { helpPlugin } from "@crustjs/plugins";
 
-import { daemon } from "./daemon/client";
-import { ensureDaemonRunning, stopDaemon } from "./daemon/launcher";
-import { JobState } from "./daemon/protocol";
-import { runDaemonServer } from "./daemon/server";
+import { daemon } from "@techatnyu/ralphd/client";
+import {
+	ensureDaemonRunning,
+	runForegroundDaemon,
+	stopDaemon,
+} from "@techatnyu/ralphd/launcher";
+import { JobState } from "@techatnyu/ralphd/protocol";
 import { runTui } from "./index";
 
 async function requireDaemon(): Promise<void> {
@@ -42,7 +45,7 @@ const cli = new Crust("ralph")
 				cmd
 					.meta({ description: "Run the daemon in the foreground" })
 					.run(async () => {
-						await runDaemonServer();
+						await runForegroundDaemon();
 					}),
 			)
 			.command("start", (cmd) =>

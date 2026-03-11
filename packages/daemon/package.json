@@ -1,0 +1,27 @@
+{
+	"name": "@techatnyu/ralphd",
+	"version": "0.0.0",
+	"type": "module",
+	"private": true,
+	"exports": {
+		".": "./src/index.ts",
+		"./client": "./src/client.ts",
+		"./protocol": "./src/protocol.ts",
+		"./launcher": "./src/launcher.ts",
+		"./server": "./src/server.ts"
+	},
+	"scripts": {
+		"test": "bun test",
+		"check:types": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@opencode-ai/sdk": "^1.2.10",
+		"zod": "^4.3.6"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	}
+}

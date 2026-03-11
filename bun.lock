@@ -43,14 +43,14 @@
     },
     "apps/tui": {
       "name": "@techatnyu/ralph",
+      "version": "0.0.0",
       "dependencies": {
         "@crustjs/core": "^0.0.13",
         "@crustjs/plugins": "^0.0.16",
-        "@opencode-ai/sdk": "^1.2.10",
         "@opentui/core": "^0.1.77",
         "@opentui/react": "^0.1.77",
+        "@techatnyu/ralphd": "workspace:*",
         "react": "^19.2.4",
-        "zod": "^4.3.6",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -62,6 +62,20 @@
     },
     "packages/config": {
       "name": "@ralph/config",
+    },
+    "packages/daemon": {
+      "name": "@techatnyu/ralphd",
+      "version": "0.0.0",
+      "dependencies": {
+        "@opencode-ai/sdk": "^1.2.10",
+        "zod": "^4.3.6",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
     },
   },
   "catalog": {
@@ -557,6 +571,8 @@
     "@tanstack/virtual-file-routes": ["@tanstack/virtual-file-routes@1.154.7", "", {}, "sha512-cHHDnewHozgjpI+MIVp9tcib6lYEQK5MyUr0ChHpHFGBl8Xei55rohFK0I0ve/GKoHeioaK42Smd8OixPp6CTg=="],
 
     "@techatnyu/ralph": ["@techatnyu/ralph@workspace:apps/tui"],
+
+    "@techatnyu/ralphd": ["@techatnyu/ralphd@workspace:packages/daemon"],
 
     "@tokenizer/token": ["@tokenizer/token@0.3.0", "", {}, "sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A=="],
 

@@ -2,12 +2,12 @@ import { basename } from "node:path";
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { useCallback, useEffect, useState } from "react";
-import { daemon } from "../daemon/client";
+import { daemon } from "@techatnyu/ralphd/client";
 import type {
 	DaemonJob,
 	HealthResult,
 	ManagedInstance,
-} from "../daemon/protocol";
+} from "@techatnyu/ralphd/protocol";
 
 interface DashboardData {
 	health: HealthResult;
