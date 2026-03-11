@@ -452,7 +452,6 @@ export const ResponseMessage = z.union([
 export type ResponseMessage = z.infer<typeof ResponseMessage>;
 
 export const DaemonState = z.strictObject({
-	version: z.literal(2),
 	instances: z.array(ManagedInstance),
 	jobs: z.array(DaemonJob),
 });

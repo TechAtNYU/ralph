@@ -267,7 +267,6 @@ describe("Daemon", () => {
 
 	test("requeues running jobs after restart", async () => {
 		await store.save({
-			version: 2,
 			instances: [
 				{
 					id: "instance-1",

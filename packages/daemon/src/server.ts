@@ -83,7 +83,6 @@ function normalizeErrorMessage(error: unknown): string {
 export class Daemon {
 	private state: DaemonState = structuredClone(
 		DaemonStateSchema.parse({
-			version: 2,
 			instances: [],
 			jobs: [],
 		}),

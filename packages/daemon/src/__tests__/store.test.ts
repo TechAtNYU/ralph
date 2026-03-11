@@ -51,12 +51,11 @@ describe("StateStore", () => {
 
 	test("returns empty state when file does not exist", async () => {
 		const state = await store.load();
-		expect(state).toEqual({ version: 2, instances: [], jobs: [] });
+		expect(state).toEqual({ instances: [], jobs: [] });
 	});
 
 	test("writes state to disk as formatted JSON", async () => {
 		const state: DaemonState = {
-			version: 2,
 			instances: [makeInstance()],
 			jobs: [makeJob()],
 		};
@@ -69,8 +68,25 @@ describe("StateStore", () => {
 		expect(parsed.jobs).toHaveLength(1);
 	});
 
+	test("loads a legacy state file with a version field", async () => {
+		await Bun.write(
+			statePath,
+			JSON.stringify({
+				version: 2,
+				instances: [makeInstance()],
+				jobs: [makeJob()],
+			}),
+		);
+
+		const state = await store.load();
+		expect(state).toEqual({
+			instances: [makeInstance()],
+			jobs: [makeJob()],
+		});
+	});
+
 	test("adds and updates instances", () => {
-		let state: DaemonState = { version: 2, instances: [], jobs: [] };
+		let state: DaemonState = { instances: [], jobs: [] };
 		state = store.createInstance(state, makeInstance());
 		expect(state.instances).toHaveLength(1);
 		state = store.upsertInstance(
@@ -85,7 +101,6 @@ describe("StateStore", () => {
 
 	test("rejects duplicate instance directories", () => {
 		const state: DaemonState = {
-			version: 2,
 			instances: [makeInstance()],
 			jobs: [],
 		};
@@ -99,7 +114,6 @@ describe("StateStore", () => {
 
 	test("filters jobs by instance and state", () => {
 		const state: DaemonState = {
-			version: 2,
 			instances: [
 				makeInstance(),
 				makeInstance({ id: "instance-2", directory: "/tmp/project-two" }),

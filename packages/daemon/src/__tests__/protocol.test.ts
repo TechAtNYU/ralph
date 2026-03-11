@@ -63,9 +63,8 @@ describe("protocol schemas", () => {
 		expect(parsed.success).toBe(false);
 	});
 
-	test("parses versioned daemon state", () => {
+	test("parses daemon state", () => {
 		const parsed = DaemonState.safeParse({
-			version: 2,
 			instances: [],
 			jobs: [],
 		});

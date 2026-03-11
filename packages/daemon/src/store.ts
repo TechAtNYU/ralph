@@ -7,15 +7,22 @@ import {
 	type DaemonState,
 	DaemonState as DaemonStateSchema,
 	type ManagedInstance,
-	type RequestMethod,
 	type ResponseError as ResponseErrorSchema,
 } from "./protocol";
 
 const EMPTY_STATE: DaemonState = {
-	version: 2,
 	instances: [],
 	jobs: [],
 };
+
+function normalizePersistedState(parsed: unknown): unknown {
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return parsed;
+	}
+
+	const { ...state } = parsed;
+	return state;
+}
 
 export class StoreError extends Error {
 	constructor(
@@ -37,7 +44,9 @@ export class StateStore {
 		try {
 			const raw = await readFile(this.statePath, "utf8");
 			const parsed = JSON.parse(raw) as unknown;
-			const current = DaemonStateSchema.safeParse(parsed);
+			const current = DaemonStateSchema.safeParse(
+				normalizePersistedState(parsed),
+			);
 			if (current.success) {
 				return current.data;
 			}
@@ -187,21 +196,4 @@ export class StateStore {
 		}
 		return job;
 	}
-}
-
-export function requestMethodList(): RequestMethod[] {
-	return [
-		"daemon.health",
-		"daemon.shutdown",
-		"instance.create",
-		"instance.list",
-		"instance.get",
-		"instance.start",
-		"instance.stop",
-		"instance.remove",
-		"job.submit",
-		"job.list",
-		"job.get",
-		"job.cancel",
-	];
 }
