@@ -4,10 +4,7 @@ import { connect, createServer, type Socket } from "node:net";
 import { dirname } from "node:path";
 import type { Part } from "@opencode-ai/sdk/v2";
 import { z } from "zod";
-import {
-	resolveDaemonRuntimeEnv,
-	SOCKET_PATH,
-} from "./env";
+import { resolveDaemonRuntimeEnv, SOCKET_PATH } from "./env";
 import {
 	type ManagedOpencodeRuntime,
 	OpencodeRegistry,
@@ -413,10 +410,7 @@ export class Daemon {
 	}
 
 	private async drainQueue(): Promise<void> {
-		while (
-			!this.shuttingDown &&
-			this.runningJobs.size < this.maxConcurrency
-		) {
+		while (!this.shuttingDown && this.runningJobs.size < this.maxConcurrency) {
 			const job = this.dequeueNextJob();
 			if (!job) {
 				break;
