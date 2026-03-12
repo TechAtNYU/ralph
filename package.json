@@ -12,7 +12,6 @@
 		"release:build": "bun run scripts/release/build-binaries.ts",
 		"release:stage": "bun run scripts/release/stage-npm.ts",
 		"release:publish": "bun run scripts/release/publish-npm.ts",
-		"release:ci": "bun run release:build && bun run release:stage && bun run release:publish",
 		"release:dry-run": "bun run scripts/release/publish-npm.ts --dry-run"
 	},
 	"devDependencies": {

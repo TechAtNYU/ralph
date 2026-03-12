@@ -40,16 +40,11 @@ jobs:
       - name: Test
         run: bun run test
 
-      - name: Configure npm auth
-        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       - name: Create release PR or publish
         uses: changesets/action@v1
         with:
           version: bun run version:packages
-          publish: bun run release:ci
+          publish: bun run release:build && bun run release:stage && bun run release:publish && bunx changeset tag
           commit: "chore: version packages"
           title: "chore: version packages"
         env:

@@ -152,7 +152,6 @@ async function runCommand(command: string, args: string[], cwd?: string) {
 	await new Promise<void>((resolve, reject) => {
 		const child = spawn(command, args, {
 			cwd,
-			env: process.env,
 			stdio: "inherit",
 		});
 
@@ -495,9 +494,6 @@ export async function publishDistribution(
 		if (dryRun) {
 			console.log(`(dry-run) cwd=${packageDir} bun ${args.join(" ")}`);
 			continue;
-		}
-		if (!process.env.NPM_CONFIG_TOKEN && process.env.NPM_TOKEN) {
-			process.env.NPM_CONFIG_TOKEN = process.env.NPM_TOKEN;
 		}
 		await runCommand("bun", args, packageDir);
 	}
