@@ -43,7 +43,7 @@
     },
     "apps/tui": {
       "name": "@techatnyu/ralph",
-      "version": "0.0.0",
+      "version": "0.0.1",
       "dependencies": {
         "@crustjs/core": "^0.0.13",
         "@crustjs/plugins": "^0.0.16",

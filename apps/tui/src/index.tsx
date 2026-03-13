@@ -2,8 +2,16 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { ensureDaemonRunning } from "@techatnyu/ralphd";
 import { App } from "./components/app";
+import { ensureOpencodeReady } from "./onboarding";
 
 export async function runTui(): Promise<void> {
+	const onboarding = await ensureOpencodeReady();
+
+	if (!onboarding.ok) {
+		console.error(onboarding.message);
+		return;
+	}
+
 	const renderer = await createCliRenderer();
 	const root = createRoot(renderer);
 	const online = await ensureDaemonRunning();
