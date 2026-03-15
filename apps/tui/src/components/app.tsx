@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { TextAttributes } from "@opentui/core";
+import { type SelectOption, TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import type {
 	DaemonJob,
@@ -8,11 +8,34 @@ import type {
 } from "@techatnyu/ralphd";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useState } from "react";
+import { ralphStore } from "../store";
 
 interface DashboardData {
 	health: HealthResult;
 	instances: ManagedInstance[];
 	jobs: DaemonJob[];
+}
+
+const MODELS_DEV_URL = "https://models.dev/api.json";
+
+async function fetchModelOptions(): Promise<SelectOption[]> {
+	const response = await fetch(MODELS_DEV_URL);
+	if (!response.ok) return [];
+	const catalog = (await response.json()) as Record<
+		string,
+		{
+			id: string;
+			name: string;
+			models: Record<string, { id: string; name: string }>;
+		}
+	>;
+	return Object.values(catalog).flatMap((provider) =>
+		Object.values(provider.models).map((model) => ({
+			name: `${provider.name}/${model.name}`,
+			description: `${provider.id}/${model.id}`,
+			value: `${provider.id}/${model.id}`,
+		})),
+	);
 }
 
 interface AppProps {
@@ -45,16 +68,21 @@ export function App({ onQuit }: AppProps) {
 	const [error, setError] = useState<string>();
 	const [data, setData] = useState<DashboardData>();
 	const [selectedIndex, setSelectedIndex] = useState(0);
+	const [currentModel, setCurrentModel] = useState("");
+	const [modelPicker, setModelPicker] = useState(false);
+	const [modelOptions, setModelOptions] = useState<SelectOption[]>([]);
 
 	const refresh = useCallback(
 		async (nextIndex = selectedIndex) => {
 			setLoading(true);
 			setError(undefined);
 			try {
-				const [health, instanceList] = await Promise.all([
+				const [health, instanceList, storeState] = await Promise.all([
 					daemon.health(),
 					daemon.listInstances(),
+					ralphStore.read(),
 				]);
+				setCurrentModel(storeState.model);
 				const safeIndex = clampIndex(nextIndex, instanceList.instances.length);
 				const selected = instanceList.instances[safeIndex];
 				const jobs = await daemon.listJobs(
@@ -84,6 +112,13 @@ export function App({ onQuit }: AppProps) {
 	}, [refresh]);
 
 	useKeyboard((key) => {
+		if (modelPicker) {
+			if (key.name === "escape" || key.name === "q") {
+				setModelPicker(false);
+			}
+			return;
+		}
+
 		if (key.name === "q") {
 			onQuit();
 			return;
@@ -91,6 +126,14 @@ export function App({ onQuit }: AppProps) {
 
 		if (key.name === "r") {
 			void refresh();
+			return;
+		}
+
+		if (key.name === "m") {
+			void fetchModelOptions().then((options) => {
+				setModelOptions(options);
+				setModelPicker(true);
+			});
 			return;
 		}
 
@@ -113,6 +156,36 @@ export function App({ onQuit }: AppProps) {
 
 	const selected = data?.instances[selectedIndex];
 
+	if (modelPicker) {
+		return (
+			<box flexDirection="column" flexGrow={1} padding={1}>
+				<box flexDirection="column" marginBottom={1}>
+					<text attributes={TextAttributes.BOLD}>Select Model</text>
+					<text attributes={TextAttributes.DIM}>
+						{`${modelOptions.length} models available — esc: cancel`}
+					</text>
+				</box>
+				<select
+					focused
+					flexGrow={1}
+					options={modelOptions}
+					showDescription
+					showScrollIndicator
+					wrapSelection
+					onSelect={(_index, option) => {
+						if (option?.value) {
+							const modelRef = option.value as string;
+							void ralphStore.patch({ model: modelRef }).then(() => {
+								setCurrentModel(modelRef);
+								setModelPicker(false);
+							});
+						}
+					}}
+				/>
+			</box>
+		);
+	}
+
 	return (
 		<box flexDirection="column" flexGrow={1} padding={1}>
 			<box flexDirection="column" marginBottom={1}>
@@ -126,7 +199,7 @@ export function App({ onQuit }: AppProps) {
 				</text>
 				<text attributes={TextAttributes.DIM}>
 					{data
-						? `${data.health.running} running, ${data.health.queued} queued`
+						? `${data.health.running} running, ${data.health.queued} queued | Model: ${currentModel || "default"}`
 						: (error ?? "No data available")}
 				</text>
 			</box>
@@ -180,7 +253,7 @@ export function App({ onQuit }: AppProps) {
 
 			<box flexDirection="column" marginTop={1}>
 				<text attributes={TextAttributes.DIM}>
-					{error ?? "j/k or arrows: select  r: refresh  q: quit"}
+					{error ?? "j/k or arrows: select  m: model  r: refresh  q: quit"}
 				</text>
 			</box>
 		</box>

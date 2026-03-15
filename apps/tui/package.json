@@ -23,6 +23,7 @@
 		"@techatnyu/ralphd": "workspace:*",
 		"@crustjs/core": "^0.0.13",
 		"@crustjs/plugins": "^0.0.16",
+		"@crustjs/store": "^0.0.4",
 		"@opentui/core": "^0.1.77",
 		"@opentui/react": "^0.1.77",
 		"react": "^19.2.4"
