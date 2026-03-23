@@ -1,186 +1,80 @@
-import { basename } from "node:path";
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
-import type {
-	DaemonJob,
-	HealthResult,
-	ManagedInstance,
-} from "@techatnyu/ralphd";
-import { daemon } from "@techatnyu/ralphd";
-import { useCallback, useEffect, useState } from "react";
-
-interface DashboardData {
-	health: HealthResult;
-	instances: ManagedInstance[];
-	jobs: DaemonJob[];
-}
+import { useState } from "react";
+import { ExecuteView } from "./execute-view";
+import { PlanView } from "./plan-view";
+import { ReviewView } from "./review-view";
 
 interface AppProps {
 	onQuit(): void;
 }
 
-function clampIndex(index: number, length: number): number {
-	if (length <= 0) {
-		return 0;
-	}
-	return Math.min(Math.max(index, 0), length - 1);
-}
+type FocusZone = "tabs" | "content";
 
-function countJobsByState(
-	jobs: DaemonJob[],
-	instanceId: string,
-): { running: number; queued: number } {
-	let running = 0;
-	let queued = 0;
-	for (const job of jobs) {
-		if (job.instanceId !== instanceId) continue;
-		if (job.state === "running") running++;
-		else if (job.state === "queued") queued++;
-	}
-	return { running, queued };
-}
+const TAB_OPTIONS = [
+	{ name: "Plan", description: "Create spec & PRD" },
+	{ name: "Execute", description: "Run agents" },
+	{ name: "Review", description: "Review changes" },
+];
+
+const HELP_TEXT: Record<number, string> = {
+	0: "Tab: focus tabs  Ctrl+H/L: switch panels  m: toggle mode  q: quit",
+	1: "Tab: focus tabs  j/k: select  r: refresh  q: quit",
+	2: "Tab: focus tabs  q: quit",
+};
 
 export function App({ onQuit }: AppProps) {
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string>();
-	const [data, setData] = useState<DashboardData>();
-	const [selectedIndex, setSelectedIndex] = useState(0);
-
-	const refresh = useCallback(
-		async (nextIndex = selectedIndex) => {
-			setLoading(true);
-			setError(undefined);
-			try {
-				const [health, instanceList] = await Promise.all([
-					daemon.health(),
-					daemon.listInstances(),
-				]);
-				const safeIndex = clampIndex(nextIndex, instanceList.instances.length);
-				const selected = instanceList.instances[safeIndex];
-				const jobs = await daemon.listJobs(
-					selected ? { instanceId: selected.id } : {},
-				);
-				setSelectedIndex(safeIndex);
-				setData({
-					health,
-					instances: instanceList.instances,
-					jobs: jobs.jobs,
-				});
-			} catch (refreshError) {
-				setError(
-					refreshError instanceof Error
-						? refreshError.message
-						: "Failed to load daemon status",
-				);
-			} finally {
-				setLoading(false);
-			}
-		},
-		[selectedIndex],
-	);
-
-	useEffect(() => {
-		void refresh();
-	}, [refresh]);
+	const [activeTab, setActiveTab] = useState(0);
+	const [focusZone, setFocusZone] = useState<FocusZone>("content");
 
 	useKeyboard((key) => {
-		if (key.name === "q") {
+		if (key.name === "tab") {
+			setFocusZone((z) => (z === "tabs" ? "content" : "tabs"));
+			return;
+		}
+
+		if (key.name === "q" && focusZone === "tabs") {
 			onQuit();
 			return;
 		}
 
-		if (key.name === "r") {
-			void refresh();
-			return;
-		}
-
-		if (!data) {
-			return;
-		}
-
-		if (key.name === "down" || key.name === "j") {
-			const next = clampIndex(selectedIndex + 1, data.instances.length);
-			void refresh(next);
-			return;
-		}
-
-		if (key.name === "up" || key.name === "k") {
-			const next = clampIndex(selectedIndex - 1, data.instances.length);
-			void refresh(next);
-			return;
+		if (focusZone === "tabs") {
+			if (key.name === "left" || key.name === "h") {
+				setActiveTab((t) => Math.max(0, t - 1));
+				return;
+			}
+			if (key.name === "right" || key.name === "l") {
+				setActiveTab((t) => Math.min(TAB_OPTIONS.length - 1, t + 1));
+				return;
+			}
 		}
 	});
 
-	const selected = data?.instances[selectedIndex];
+	const contentFocused = focusZone === "content";
 
 	return (
 		<box flexDirection="column" flexGrow={1} padding={1}>
 			<box flexDirection="column" marginBottom={1}>
 				<ascii-font font="tiny" text="Ralph" />
-				<text attributes={TextAttributes.BOLD}>
-					{loading
-						? "Refreshing daemon status..."
-						: data
-							? `Daemon online (pid ${data.health.pid})`
-							: "Daemon status unavailable"}
-				</text>
-				<text attributes={TextAttributes.DIM}>
-					{data
-						? `${data.health.running} running, ${data.health.queued} queued`
-						: (error ?? "No data available")}
-				</text>
 			</box>
 
-			<box flexDirection="row" flexGrow={1} gap={2}>
-				<box flexDirection="column" width="55%">
-					<text attributes={TextAttributes.BOLD}>Instances</text>
-					{data?.instances.length ? (
-						data.instances.map((instance: ManagedInstance, index: number) => {
-							const focused = index === selectedIndex;
-							const counts = countJobsByState(data.jobs, instance.id);
-							return (
-								<text
-									key={instance.id}
-									attributes={
-										focused ? TextAttributes.BOLD : TextAttributes.DIM
-									}
-								>
-									{`${focused ? ">" : " "} ${instance.name} [${instance.status}] ${basename(instance.directory)} (${counts.running}r/${counts.queued}q)`}
-								</text>
-							);
-						})
-					) : (
-						<text attributes={TextAttributes.DIM}>No instances registered</text>
-					)}
-				</box>
+			<tab-select
+				options={TAB_OPTIONS}
+				focused={focusZone === "tabs"}
+				onChange={(_index: number) => {
+					setActiveTab(_index);
+				}}
+			/>
 
-				<box flexDirection="column" width="45%">
-					<text attributes={TextAttributes.BOLD}>
-						{selected ? `Jobs for ${selected.name}` : "Jobs"}
-					</text>
-					{selected ? (
-						data?.jobs.length ? (
-							data.jobs.map((job: DaemonJob) => (
-								<text key={job.id} attributes={TextAttributes.DIM}>
-									{`${job.id.slice(0, 8)} ${job.state} ${job.task.type === "prompt" ? job.task.prompt : ""}`}
-								</text>
-							))
-						) : (
-							<text attributes={TextAttributes.DIM}>
-								No jobs for the selected instance
-							</text>
-						)
-					) : (
-						<text attributes={TextAttributes.DIM}>
-							Select an instance to inspect jobs
-						</text>
-					)}
-				</box>
+			<box flexDirection="column" flexGrow={1} marginTop={1}>
+				{activeTab === 0 && <PlanView focused={contentFocused} />}
+				{activeTab === 1 && <ExecuteView focused={contentFocused} />}
+				{activeTab === 2 && <ReviewView />}
 			</box>
 
 			<box flexDirection="column" marginTop={1}>
 				<text attributes={TextAttributes.DIM}>
-					{error ?? "j/k or arrows: select  r: refresh  q: quit"}
+					{HELP_TEXT[activeTab] ?? ""}
 				</text>
 			</box>
 		</box>
