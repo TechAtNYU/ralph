@@ -2,7 +2,7 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { ensureDaemonRunning } from "@techatnyu/ralphd";
 import { App } from "./components/app";
-import { ensureOpencodeReady } from "./onboarding";
+import { ensureOpencodeReady } from "./lib/onboarding";
 
 export async function runTui(): Promise<void> {
 	const onboarding = await ensureOpencodeReady();
