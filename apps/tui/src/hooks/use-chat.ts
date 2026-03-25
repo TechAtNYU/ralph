@@ -14,6 +14,7 @@ interface UseChatReturn {
 	loading: boolean;
 	error: string | undefined;
 	send: (prompt: string, mode: ChatMode) => Promise<void>;
+	clear: () => void;
 }
 
 const SKILL_PROMPTS: Record<ChatMode, string> = {
@@ -105,5 +106,11 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 		[loading, ensureInstance, stopPolling],
 	);
 
-	return { messages, loading, error, send };
+	const clear = useCallback(() => {
+		setMessages([]);
+		sessionIdRef.current = null;
+		setError(undefined);
+	}, []);
+
+	return { messages, loading, error, send, clear };
 }
