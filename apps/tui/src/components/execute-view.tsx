@@ -1,4 +1,3 @@
-import { basename } from "node:path";
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import type {
@@ -38,6 +37,19 @@ function countJobsByState(
 		else if (job.state === "queued") queued++;
 	}
 	return { running, queued };
+}
+
+function statusColor(status: string): string {
+	if (status === "running") return "green";
+	if (status === "error") return "red";
+	return "#666666";
+}
+
+function jobStateColor(state: string): string {
+	if (state === "running") return "cyan";
+	if (state === "succeeded") return "green";
+	if (state === "failed") return "red";
+	return "#888888";
 }
 
 export function ExecuteView({ focused }: ExecuteViewProps) {
@@ -113,7 +125,7 @@ export function ExecuteView({ focused }: ExecuteViewProps) {
 			<box flexDirection="column" marginBottom={1}>
 				<text attributes={TextAttributes.BOLD}>
 					{loading
-						? "Refreshing daemon status..."
+						? "Refreshing..."
 						: data
 							? `Daemon online (pid ${data.health.pid})`
 							: "Daemon status unavailable"}
@@ -125,22 +137,28 @@ export function ExecuteView({ focused }: ExecuteViewProps) {
 				</text>
 			</box>
 
-			<box flexDirection="row" flexGrow={1} gap={2}>
-				<box flexDirection="column" width="55%">
+			<box flexDirection="row" flexGrow={1} gap={3}>
+				<box flexDirection="column" width="45%">
 					<text attributes={TextAttributes.BOLD}>Instances</text>
+					<text fg="#555555">{"─".repeat(20)}</text>
 					{data?.instances.length ? (
 						data.instances.map((instance: ManagedInstance, index: number) => {
-							const isFocused = index === selectedIndex;
+							const isSelected = index === selectedIndex;
 							const counts = countJobsByState(data.jobs, instance.id);
 							return (
-								<text
-									key={instance.id}
-									attributes={
-										isFocused ? TextAttributes.BOLD : TextAttributes.DIM
-									}
-								>
-									{`${isFocused ? ">" : " "} ${instance.name} [${instance.status}] ${basename(instance.directory)} (${counts.running}r/${counts.queued}q)`}
-								</text>
+								<box key={instance.id} flexDirection="row" height={1}>
+									<text fg={statusColor(instance.status)}>{"● "}</text>
+									<text
+										fg={isSelected ? "white" : "#aaaaaa"}
+										attributes={isSelected ? TextAttributes.BOLD : undefined}
+									>
+										{instance.name}
+									</text>
+									<box flexGrow={1} />
+									<text attributes={TextAttributes.DIM}>
+										{`${instance.status}  ${counts.running}r/${counts.queued}q`}
+									</text>
+								</box>
 							);
 						})
 					) : (
@@ -148,34 +166,41 @@ export function ExecuteView({ focused }: ExecuteViewProps) {
 					)}
 				</box>
 
-				<box flexDirection="column" width="45%">
+				<box flexDirection="column" width="55%">
 					<text attributes={TextAttributes.BOLD}>
-						{selected ? `Jobs for ${selected.name}` : "Jobs"}
+						{selected ? `Jobs for "${selected.name}"` : "Jobs"}
 					</text>
+					<text fg="#555555">{"─".repeat(30)}</text>
 					{selected ? (
 						data?.jobs.length ? (
-							data.jobs.map((job: DaemonJob) => (
-								<text key={job.id} attributes={TextAttributes.DIM}>
-									{`${job.id.slice(0, 8)} ${job.state} ${job.task.type === "prompt" ? job.task.prompt : ""}`}
-								</text>
-							))
+							<scrollbox flexGrow={1} minHeight={0}>
+								{data.jobs.map((job: DaemonJob) => (
+									<box key={job.id} flexDirection="row" height={1}>
+										<text fg={jobStateColor(job.state)}>
+											{job.id.slice(0, 8)}
+										</text>
+										<text attributes={TextAttributes.DIM}>
+											{`  ${job.state}  `}
+										</text>
+										<text fg="#aaaaaa">
+											{job.task.type === "prompt"
+												? job.task.prompt.slice(0, 40)
+												: ""}
+										</text>
+									</box>
+								))}
+							</scrollbox>
 						) : (
 							<text attributes={TextAttributes.DIM}>
-								No jobs for the selected instance
+								No jobs for this instance
 							</text>
 						)
 					) : (
 						<text attributes={TextAttributes.DIM}>
-							Select an instance to inspect jobs
+							Select an instance to see jobs
 						</text>
 					)}
 				</box>
-			</box>
-
-			<box flexDirection="column" marginTop={1}>
-				<text attributes={TextAttributes.DIM}>
-					{error ?? "j/k or arrows: select  r: refresh"}
-				</text>
 			</box>
 		</box>
 	);
