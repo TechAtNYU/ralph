@@ -1,5 +1,5 @@
-import { $ } from "bun";
 import { basename, isAbsolute, relative, resolve } from "node:path";
+import { $ } from "bun";
 
 export interface WorktreeInfo {
 	name: string;
@@ -46,7 +46,9 @@ export class Worktree {
 
 	async list(): Promise<WorktreeInfo[]> {
 		const root = await this.repoRoot();
-		const output = await this.shell`git worktree list --porcelain`.cwd(root).text();
+		const output = await this.shell`git worktree list --porcelain`
+			.cwd(root)
+			.text();
 
 		if (!output.trim()) {
 			return [];
@@ -72,14 +74,20 @@ export class Worktree {
 
 				const path = worktreeLine.replace("worktree ", "").trim();
 				const branchRef = branchLine?.replace("branch ", "").trim();
-				const branch = branchRef ? branchRef.replace("refs/heads/", "") : "HEAD";
+				const branch = branchRef
+					? branchRef.replace("refs/heads/", "")
+					: "HEAD";
 				const name = basename(path);
 
 				return { name, path, branch };
 			});
 	}
 
-	private async removeAt(root: string, name: string, force = false): Promise<void> {
+	private async removeAt(
+		root: string,
+		name: string,
+		force = false,
+	): Promise<void> {
 		const path = this.worktreePath(root, name);
 		if (force) {
 			await this.shell`git worktree remove ${path} --force`.cwd(root).text();

@@ -75,9 +75,15 @@ describe("Worktree", () => {
 		});
 		const worktree = new Worktree(shell);
 
-		await expect(worktree.create("../escape")).rejects.toThrow("Invalid worktree name");
-		await expect(worktree.remove(" bad")).rejects.toThrow("Invalid worktree name");
-		await expect(worktree.merge("a/b")).rejects.toThrow("Invalid worktree name");
+		await expect(worktree.create("../escape")).rejects.toThrow(
+			"Invalid worktree name",
+		);
+		await expect(worktree.remove(" bad")).rejects.toThrow(
+			"Invalid worktree name",
+		);
+		await expect(worktree.merge("a/b")).rejects.toThrow(
+			"Invalid worktree name",
+		);
 		expect(calls).toHaveLength(0);
 	});
 
@@ -112,13 +118,17 @@ describe("Worktree", () => {
 		const repoRoot = "/tmp/project/repo";
 		const { shell } = createFakeShell({
 			"git rev-parse --show-toplevel": `${repoRoot}\n`,
-			"git worktree list --porcelain": ["HEAD deadbeef", "branch refs/heads/main", ""].join(
-				"\n",
-			),
+			"git worktree list --porcelain": [
+				"HEAD deadbeef",
+				"branch refs/heads/main",
+				"",
+			].join("\n"),
 		});
 		const worktree = new Worktree(shell);
 
-		await expect(worktree.list()).rejects.toThrow("Unable to parse worktree entry");
+		await expect(worktree.list()).rejects.toThrow(
+			"Unable to parse worktree entry",
+		);
 	});
 
 	it("removes a worktree without force by default", async () => {
