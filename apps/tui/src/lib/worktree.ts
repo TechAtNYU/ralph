@@ -1,5 +1,5 @@
 import { basename, isAbsolute, relative, resolve } from "node:path";
-import { $ } from "bun";
+import { type ShellExpression, $ } from "bun";
 
 export interface WorktreeInfo {
 	name: string;
@@ -9,7 +9,7 @@ export interface WorktreeInfo {
 
 type ShellTag = (
 	strings: TemplateStringsArray,
-	...values: unknown[]
+	...values: ShellExpression[]
 ) => {
 	cwd(directory: string): { text(): Promise<string> };
 	text(): Promise<string>;
