@@ -29,10 +29,10 @@ export class Worktree {
 		return { name, path, branch };
 	}
 
-	async remove(name: string): Promise<void> {
+	async remove(name: string, { force = false } = {}): Promise<void> {
 		this.assertValidName(name);
 		const root = await this.repoRoot();
-		await this.removeAt(root, name);
+		await this.removeAt(root, name, force);
 	}
 
 	async merge(name: string): Promise<void> {
@@ -40,7 +40,8 @@ export class Worktree {
 		const root = await this.repoRoot();
 		const branch = this.branchName(name);
 		await this.shell`git merge ${branch}`.cwd(root).text();
-		await this.removeAt(root, name);
+		await this.removeAt(root, name, true);
+		await this.shell`git branch -d ${branch}`.cwd(root).text();
 	}
 
 	async list(): Promise<WorktreeInfo[]> {
@@ -78,9 +79,13 @@ export class Worktree {
 			});
 	}
 
-	private async removeAt(root: string, name: string): Promise<void> {
+	private async removeAt(root: string, name: string, force = false): Promise<void> {
 		const path = this.worktreePath(root, name);
-		await this.shell`git worktree remove ${path} --force`.cwd(root).text();
+		if (force) {
+			await this.shell`git worktree remove ${path} --force`.cwd(root).text();
+		} else {
+			await this.shell`git worktree remove ${path}`.cwd(root).text();
+		}
 	}
 
 	private branchName(name: string): string {

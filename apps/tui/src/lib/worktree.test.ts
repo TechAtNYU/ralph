@@ -121,7 +121,39 @@ describe("Worktree", () => {
 		await expect(worktree.list()).rejects.toThrow("Unable to parse worktree entry");
 	});
 
-	it("merge runs merge then remove", async () => {
+	it("removes a worktree without force by default", async () => {
+		const repoRoot = "/tmp/project/repo";
+		const { shell, calls } = createFakeShell({
+			"git rev-parse --show-toplevel": `${repoRoot}\n`,
+		});
+		const worktree = new Worktree(shell);
+
+		await worktree.remove("worker-4");
+
+		expect(calls.map((call) => call.command)).toEqual([
+			"git rev-parse --show-toplevel",
+			`git worktree remove ${resolve(repoRoot, "..", ".worktrees", "worker-4")}`,
+		]);
+		expect(calls[1]?.cwd).toBe(repoRoot);
+	});
+
+	it("removes a worktree with force when specified", async () => {
+		const repoRoot = "/tmp/project/repo";
+		const { shell, calls } = createFakeShell({
+			"git rev-parse --show-toplevel": `${repoRoot}\n`,
+		});
+		const worktree = new Worktree(shell);
+
+		await worktree.remove("worker-4", { force: true });
+
+		expect(calls.map((call) => call.command)).toEqual([
+			"git rev-parse --show-toplevel",
+			`git worktree remove ${resolve(repoRoot, "..", ".worktrees", "worker-4")} --force`,
+		]);
+		expect(calls[1]?.cwd).toBe(repoRoot);
+	});
+
+	it("merge runs merge, force-removes worktree, and deletes branch", async () => {
 		const repoRoot = "/tmp/project/repo";
 		const { shell, calls } = createFakeShell({
 			"git rev-parse --show-toplevel": `${repoRoot}\n`,
@@ -134,8 +166,10 @@ describe("Worktree", () => {
 			"git rev-parse --show-toplevel",
 			"git merge worktree/worker-3",
 			`git worktree remove ${resolve(repoRoot, "..", ".worktrees", "worker-3")} --force`,
+			"git branch -d worktree/worker-3",
 		]);
 		expect(calls[1]?.cwd).toBe(repoRoot);
 		expect(calls[2]?.cwd).toBe(repoRoot);
+		expect(calls[3]?.cwd).toBe(repoRoot);
 	});
 });
