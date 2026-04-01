@@ -1,5 +1,5 @@
 import { basename, isAbsolute, relative, resolve } from "node:path";
-import { type ShellExpression, $ } from "bun";
+import { $, type ShellExpression } from "bun";
 
 export interface WorktreeInfo {
 	name: string;
