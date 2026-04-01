@@ -1,8 +1,8 @@
+import { OpenRouter } from "@openrouter/sdk";
+import type { ScrollBoxRenderable } from "@opentui/core";
 import { createCliRenderer, TextAttributes } from "@opentui/core";
 import { createRoot, useKeyboard } from "@opentui/react";
-import { OpenRouter } from "@openrouter/sdk";
 import { useMemo, useRef, useState } from "react";
-import type { ScrollBoxRenderable } from "@opentui/core";
 
 type Role = "user" | "assistant" | "system";
 
@@ -16,17 +16,17 @@ const OPENROUTER_MODEL = "liquid/lfm-2.5-1.2b-instruct:free";
 
 const runtime = {
 	isShuttingDown: false,
-	abortController: null as AbortController | null
+	abortController: null as AbortController | null,
 };
 
-function shutdownApp() {
+function shutdownApp(onQuit: () => void) {
 	if (runtime.isShuttingDown) {
 		return;
 	}
 
 	runtime.isShuttingDown = true;
 	runtime.abortController?.abort();
-	process.exit(0);
+	onQuit();
 }
 
 function createOpenRouterClient(): OpenRouter {
@@ -38,12 +38,16 @@ function createOpenRouterClient(): OpenRouter {
 	return new OpenRouter({ apiKey });
 }
 
-function App() {
+interface AppProps {
+	onQuit(): void;
+}
+
+function App({ onQuit }: AppProps) {
 	const [messages, setMessages] = useState<ChatMessage[]>([
 		{
 			role: "assistant",
-			content: "Hello! I am connected to OpenRouter. Ask me anything."
-		}
+			content: "Hello! I am connected to OpenRouter. Ask me anything.",
+		},
 	]);
 	const [inputValue, setInputValue] = useState("");
 	const [isLoading, setIsLoading] = useState(false);
@@ -62,11 +66,11 @@ function App() {
 
 	useKeyboard((event) => {
 		if (event.ctrl && event.name === "c") {
-			shutdownApp();
+			shutdownApp(onQuit);
 		}
 
 		if (event.name === "escape") {
-			shutdownApp();
+			shutdownApp(onQuit);
 		}
 
 		if (event.name === "pageup") {
@@ -91,13 +95,16 @@ function App() {
 			const updated = [...previous];
 			const lastMessage = updated[updated.length - 1];
 
-			if (lastMessage?.role === "assistant" && lastMessage.content.length === 0) {
+			if (
+				lastMessage?.role === "assistant" &&
+				lastMessage.content.length === 0
+			) {
 				updated.pop();
 			}
 
 			updated.push({
 				role: "system",
-				content: `Error: ${message}`
+				content: `Error: ${message}`,
 			});
 
 			return updated;
@@ -120,27 +127,38 @@ function App() {
 		setReasoningTokens(null);
 		setInputValue("");
 
-		const nextMessages = [...messages, { role: "user" as const, content: trimmedValue }];
+		const nextMessages = [
+			...messages,
+			{ role: "user" as const, content: trimmedValue },
+		];
 		setMessages(nextMessages);
 		setIsLoading(true);
 
 		try {
 			const abortController = new AbortController();
 			runtime.abortController = abortController;
-			setMessages((previous) => [...previous, { role: "assistant", content: "" }]);
+			setMessages((previous) => [
+				...previous,
+				{ role: "assistant", content: "" },
+			]);
 
 			const openrouter = createOpenRouterClient();
-			const stream = await openrouter.chat.send({
-				httpReferer: process.env.OPENROUTER_HTTP_REFERER ?? "https://github.com/TechAtNYU/ralph",
-				xTitle: process.env.OPENROUTER_APP_NAME ?? "Ralph OpenTUI",
-				chatGenerationParams: {
-					model: OPENROUTER_MODEL,
-					messages: nextMessages,
-					stream: true
-				}
-			}, {
-				signal: abortController.signal
-			});
+			const stream = await openrouter.chat.send(
+				{
+					httpReferer:
+						process.env.OPENROUTER_HTTP_REFERER ??
+						"https://github.com/TechAtNYU/ralph",
+					xTitle: process.env.OPENROUTER_APP_NAME ?? "Ralph OpenTUI",
+					chatGenerationParams: {
+						model: OPENROUTER_MODEL,
+						messages: nextMessages,
+						stream: true,
+					},
+				},
+				{
+					signal: abortController.signal,
+				},
+			);
 
 			for await (const chunk of stream) {
 				if (abortController.signal.aborted || runtime.isShuttingDown) {
@@ -163,7 +181,7 @@ function App() {
 						if (assistantMessage?.role === "assistant") {
 							updated[assistantIndex] = {
 								...assistantMessage,
-								content: assistantMessage.content + content
+								content: assistantMessage.content + content,
 							};
 						}
 
@@ -185,7 +203,10 @@ function App() {
 				return;
 			}
 
-			const message = error instanceof Error ? error.message : "Unknown error while calling OpenRouter.";
+			const message =
+				error instanceof Error
+					? error.message
+					: "Unknown error while calling OpenRouter.";
 			setErrorMessage(message);
 			appendErrorToChat(message);
 		} finally {
@@ -202,8 +223,11 @@ function App() {
 			<box flexShrink={0} height={1} width="100%">
 				<text attributes={TextAttributes.DIM}>
 					Ralph OpenRouter Chat · model: {OPENROUTER_MODEL}
-					{typeof reasoningTokens === "number" ? ` · reasoning tokens: ${reasoningTokens}` : ""}
-					{errorMessage ? ` · error: ${errorMessage}` : ""} · PgUp/PgDn or Ctrl+U/Ctrl+D scroll · esc / ctrl+c quit
+					{typeof reasoningTokens === "number"
+						? ` · reasoning tokens: ${reasoningTokens}`
+						: ""}
+					{errorMessage ? ` · error: ${errorMessage}` : ""} · PgUp/PgDn or
+					Ctrl+U/Ctrl+D scroll · esc / ctrl+c quit
 				</text>
 			</box>
 
@@ -221,10 +245,19 @@ function App() {
 				marginBottom={0}
 			>
 				{messages.map((message, index) => {
-					const label = message.role === "user" ? "You" : message.role === "assistant" ? "Assistant" : "System";
+					const label =
+						message.role === "user"
+							? "You"
+							: message.role === "assistant"
+								? "Assistant"
+								: "System";
 
 					return (
-						<box key={`${message.role}-${index}`} flexDirection="column" marginBottom={1}>
+						<box
+							key={`${message.role}-${index}`}
+							flexDirection="column"
+							marginBottom={1}
+						>
 							<text attributes={TextAttributes.BOLD}>{label}</text>
 							<text>{message.content}</text>
 						</box>
@@ -235,7 +268,13 @@ function App() {
 				) : null}
 			</scrollbox>
 
-			<box flexShrink={0} height={3} width="100%" border={true} borderColor="#ffffff">
+			<box
+				flexShrink={0}
+				height={3}
+				width="100%"
+				border={true}
+				borderColor="#ffffff"
+			>
 				<input
 					focused={true}
 					value={inputValue}
@@ -243,7 +282,8 @@ function App() {
 					onInput={setInputValue}
 					onChange={setInputValue}
 					onSubmit={(value) => {
-						const submittedValue = typeof value === "string" ? value : inputValue;
+						const submittedValue =
+							typeof value === "string" ? value : inputValue;
 						void sendMessage(submittedValue);
 					}}
 				/>
@@ -252,11 +292,34 @@ function App() {
 	);
 }
 
-const renderer = await createCliRenderer({
-	onDestroy: () => {
-		runtime.abortController?.abort();
+export async function runTui(): Promise<void> {
+	runtime.isShuttingDown = false;
+	const renderer = await createCliRenderer({
+		onDestroy: () => {
+			runtime.abortController?.abort();
+			runtime.abortController = null;
+			runtime.isShuttingDown = true;
+		},
+	});
+	const root = createRoot(renderer);
+	let closed = false;
+
+	const close = () => {
+		if (closed) {
+			return;
+		}
+
+		closed = true;
 		runtime.isShuttingDown = true;
-		process.exit(0);
-	}
-});
-createRoot(renderer).render(<App />);
+		runtime.abortController?.abort();
+		runtime.abortController = null;
+		root.unmount();
+		renderer.destroy();
+	};
+
+	root.render(<App onQuit={close} />);
+}
+
+if (import.meta.main) {
+	void runTui();
+}
