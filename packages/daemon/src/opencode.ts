@@ -10,7 +10,7 @@ export interface OpencodeSessionClient {
 	create(parameters: {
 		directory?: string;
 		title?: string;
-	}): Promise<{ data: Session }>;
+	}): Promise<Session>;
 	prompt(parameters: {
 		sessionID: string;
 		directory?: string;
@@ -22,7 +22,7 @@ export interface OpencodeSessionClient {
 		system?: string;
 		variant?: string;
 		parts?: Array<TextPartInput>;
-	}): Promise<{ data: { info: AssistantMessage; parts: Part[] } }>;
+	}): Promise<{ info: AssistantMessage; parts: Part[] }>;
 	abort(parameters: {
 		sessionID: string;
 		directory?: string;
@@ -70,7 +70,7 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 			return entry.starting;
 		}
 
-		const starting = createOpencode().then(({ client, server }) => {
+		const starting = createOpencode().then(async ({ client, server }) => {
 			const runtime: ManagedOpencodeRuntime = {
 				client: {
 					instance: {
@@ -78,16 +78,18 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 					},
 					session: {
 						create: async (parameters) => {
-							return await client.session.create(parameters, {
+							const res = await client.session.create(parameters, {
 								throwOnError: true,
 								responseStyle: "data",
 							});
+							return res as unknown as Session;
 						},
 						prompt: async (parameters) => {
-							return await client.session.prompt(parameters, {
+							const res = await client.session.prompt(parameters, {
 								throwOnError: true,
 								responseStyle: "data",
 							});
+							return res as unknown as { info: AssistantMessage; parts: Part[] };
 						},
 						abort: (parameters) =>
 							client.session.abort(parameters, {
