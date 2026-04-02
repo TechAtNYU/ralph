@@ -538,8 +538,8 @@ export class Daemon {
 						variant: job.task.variant,
 						parts: [{ type: "text", text: job.task.prompt }],
 					});
-					job.messageId = response.data.info.id;
-					job.outputText = extractText(response.data.parts);
+					job.messageId = response.info.id;
+					job.outputText = extractText(response.parts);
 					job.error = undefined;
 					job.state = controller.signal.aborted ? "cancelled" : "succeeded";
 					break;
@@ -575,10 +575,10 @@ export class Daemon {
 			directory: instance.directory,
 			title: job.session.title,
 		});
-		job.sessionId = session.data.id;
+		job.sessionId = session.id;
 		this.state = this.store.upsertJob(this.state, job);
 		await this.store.save(this.state);
-		return session.data.id;
+		return session.id;
 	}
 
 	private async startInstance(instanceId: string): Promise<ManagedInstance> {
