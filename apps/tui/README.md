@@ -1,8 +1,8 @@
 # Ralph TUI + Local Daemon
 
-This app uses a local daemon (`ralphd`) for long-running loop jobs.
+This app talks to the local daemon (`ralphd`) for all runtime work.
 
-End users should normally run `ralph`. The TUI will start `ralphd` when needed.
+End users should normally run `ralph`. The TUI will start `ralphd` when needed in packaged builds.
 
 In local development, run `bun run dev` from the repo root. Turborepo will run
 the TUI and daemon together, and the TUI will wait for the foreground daemon
