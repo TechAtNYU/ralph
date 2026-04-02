@@ -1,0 +1,5 @@
+RALPH_AGENT_CMD="opencode run"
+RALPH_PROMPT_FILE="PROMPT.md"
+RALPH_SPEC_FILE="SPEC.md"
+RALPH_PRD_FILE="prd.json"
+RALPH_PROGRESS_FILE="progress.md"

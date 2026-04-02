@@ -1,0 +1,2 @@
+# {{projectName}}
+<!-- The high-level project specification. Captures what you're building and why — goals, scope, tech stack choices, and architectural decisions. Implementation details (concrete tasks, exact thresholds, file-level structure) belong in prd.json and the codebase itself. A good spec is stable and rarely needs updating as the project evolves. -->
