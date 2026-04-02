@@ -8,6 +8,14 @@ In local development, run `bun run dev` from the repo root. Turborepo will run
 the TUI and daemon together, and the TUI will wait for the foreground daemon
 instead of spawning a detached background process.
 
+## Scaffold a workspace
+
+From the `apps/tui` directory, run:
+
+```bash
+bun run src/cli.ts init /path/to/project
+```
+
 ## Advanced daemon control
 
 ```bash
