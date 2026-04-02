@@ -1,5 +1,6 @@
 import { Crust } from "@crustjs/core";
 import { helpPlugin } from "@crustjs/plugins";
+import { bootstrapRalphWorkspace } from "./scaffold";
 import {
 	daemon,
 	type JobState,
@@ -36,6 +37,22 @@ const cli = new Crust("ralph")
 	.run(async () => {
 		await runTui();
 	})
+	.command("init", (cmd) =>
+	cmd
+		.meta({ description: "Create a Ralph workspace for a project" })
+		.args([
+			{
+				name: "directory",
+				type: "string",
+				required: true,
+				description: "Project directory where .ralph will be created",
+			},
+		])
+		.run(async ({ args }) => {
+			await bootstrapRalphWorkspace(args.directory);
+			console.log(`Created Ralph workspace in ${args.directory}/.ralph`);
+		}),
+	)
 	.command("daemon", (daemonCommand) =>
 		daemonCommand
 			.meta({ description: "Manage the background daemon" })
