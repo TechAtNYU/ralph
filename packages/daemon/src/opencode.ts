@@ -7,10 +7,7 @@ import {
 } from "@opencode-ai/sdk/v2";
 
 export interface OpencodeSessionClient {
-	create(parameters: {
-		directory?: string;
-		title?: string;
-	}): Promise<Session>;
+	create(parameters: { directory?: string; title?: string }): Promise<Session>;
 	prompt(parameters: {
 		sessionID: string;
 		directory?: string;
@@ -89,7 +86,10 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 								throwOnError: true,
 								responseStyle: "data",
 							});
-							return res as unknown as { info: AssistantMessage; parts: Part[] };
+							return res as unknown as {
+								info: AssistantMessage;
+								parts: Part[];
+							};
 						},
 						abort: (parameters) =>
 							client.session.abort(parameters, {
