@@ -8,7 +8,7 @@ import type {
 } from "@techatnyu/ralphd";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useState } from "react";
-import { ralphStore } from "../store";
+import { ralphStore, setModelAndRecent } from "../store";
 import { Chat } from "./chat";
 
 type View =
@@ -21,26 +21,59 @@ interface DashboardData {
 	jobs: DaemonJob[];
 }
 
-const MODELS_DEV_URL = "https://models.dev/api.json";
+/** Provider IDs sorted by popularity — used to push well-known providers to the top. */
+const PROVIDER_PRIORITY: Record<string, number> = {
+	anthropic: 0,
+	openai: 1,
+	google: 2,
+	openrouter: 3,
+};
+
+const SEPARATOR_VALUE = "__separator__";
 
 async function fetchModelOptions(): Promise<SelectOption[]> {
-	const response = await fetch(MODELS_DEV_URL);
-	if (!response.ok) return [];
-	const catalog = (await response.json()) as Record<
-		string,
-		{
-			id: string;
-			name: string;
-			models: Record<string, { id: string; name: string }>;
-		}
-	>;
-	return Object.values(catalog).flatMap((provider) =>
-		Object.values(provider.models).map((model) => ({
-			name: `${provider.name}/${model.name}`,
-			description: `${provider.id}/${model.id}`,
-			value: `${provider.id}/${model.id}`,
-		})),
-	);
+	const [result, store] = await Promise.all([
+		daemon.providerList(),
+		ralphStore.read(),
+	]);
+	const connected = new Set(result.connected);
+	const recentRefs = new Set(store.recentModels ?? []);
+
+	// Build flat list of all connected models
+	const allModels: SelectOption[] = result.providers
+		.filter((provider) => connected.has(provider.id))
+		.sort(
+			(a, b) =>
+				(PROVIDER_PRIORITY[a.id] ?? 99) - (PROVIDER_PRIORITY[b.id] ?? 99) ||
+				a.name.localeCompare(b.name),
+		)
+		.flatMap((provider) =>
+			Object.values(provider.models)
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map((model) => ({
+					name: `${provider.name}/${model.name}`,
+					description: `${provider.id}/${model.id}`,
+					value: `${provider.id}/${model.id}`,
+				})),
+		);
+
+	// Build recent section from stored order, only including models that still exist
+	const allByRef = new Map(allModels.map((m) => [m.value, m]));
+	const recentOptions: SelectOption[] = (store.recentModels ?? [])
+		.filter((ref) => allByRef.has(ref))
+		.map((ref) => allByRef.get(ref)!);
+
+	if (recentOptions.length === 0) return allModels;
+
+	// Filter recents out of the "all" section to avoid duplicates
+	const restModels = allModels.filter((m) => !recentRefs.has(m.value as string));
+
+	return [
+		{ name: "── Recent ──", description: "", value: SEPARATOR_VALUE },
+		...recentOptions,
+		{ name: "── All Models ──", description: "", value: SEPARATOR_VALUE },
+		...restModels,
+	];
 }
 
 interface AppProps {
@@ -192,9 +225,9 @@ function Dashboard({
 					showScrollIndicator
 					wrapSelection
 					onSelect={(_index, option) => {
-						if (option?.value) {
+						if (option?.value && option.value !== SEPARATOR_VALUE) {
 							const modelRef = option.value as string;
-							void ralphStore.patch({ model: modelRef }).then(() => {
+							void setModelAndRecent(modelRef).then(() => {
 								setCurrentModel(modelRef);
 								setModelPicker(false);
 							});

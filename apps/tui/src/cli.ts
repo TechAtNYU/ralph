@@ -9,7 +9,7 @@ import {
 	waitUntilReady,
 } from "@techatnyu/ralphd";
 import { runTui } from "./index";
-import { parseModelRef, ralphStore } from "./store";
+import { parseModelRef, ralphStore, setModelAndRecent } from "./store";
 
 async function requireDaemon(): Promise<void> {
 	const running = await daemon.isDaemonRunning();
@@ -319,7 +319,7 @@ const cli = new Crust("ralph")
 								"Invalid model format. Use provider/model (e.g. anthropic/claude-sonnet-4-5)",
 							);
 						}
-						await ralphStore.patch({ model: args.model });
+						await setModelAndRecent(args.model);
 						console.log(`Model set to: ${args.model}`);
 					}),
 			)

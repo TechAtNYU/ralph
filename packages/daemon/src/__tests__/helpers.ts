@@ -125,6 +125,12 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 						return undefined;
 					},
 				},
+				provider: {
+					list: async () => ({
+						providers: [],
+						connected: [],
+					}),
+				},
 			},
 			server: {
 				url: `fake://${instanceId}`,
@@ -149,5 +155,9 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 
 	async stopAll(): Promise<void> {
 		this.runtimes.clear();
+	}
+
+	async queryProviders() {
+		return { providers: [], connected: [] };
 	}
 }

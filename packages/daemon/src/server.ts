@@ -33,6 +33,7 @@ import {
 	type ResponseMessage,
 	type ResultByMethod,
 	type ShutdownResult,
+	type ProviderListResult,
 	type SubmitResult,
 } from "./protocol";
 import { StateStore, StoreError } from "./store";
@@ -138,6 +139,8 @@ export class Daemon {
 					return this.success(raw, await this.handleInstanceStop(raw));
 				case "instance.remove":
 					return this.success(raw, await this.handleInstanceRemove(raw));
+				case "provider.list":
+					return this.success(raw, await this.handleProviderList(raw));
 				case "job.submit":
 					return this.success(raw, await this.handleJobSubmit(raw));
 				case "job.list":
@@ -290,6 +293,12 @@ export class Daemon {
 		this.state = this.store.removeInstance(this.state, instance.id);
 		await this.store.save(this.state);
 		return { instance };
+	}
+
+	private async handleProviderList(
+		request: RequestByMethod<"provider.list">,
+	): Promise<ProviderListResult> {
+		return this.registry.queryProviders(request.params.directory);
 	}
 
 	private async handleJobSubmit(

@@ -4,8 +4,25 @@ export const ralphStore = createStore({
 	dirPath: configDir("ralph"),
 	fields: {
 		model: { type: "string", default: "" },
+		recentModels: { type: "string", array: true, default: [] as string[] },
 	},
 });
+
+const RECENT_MODELS_LIMIT = 5;
+
+/**
+ * Set the active model and push it to the front of recentModels in a single atomic write.
+ */
+export async function setModelAndRecent(modelRef: string): Promise<void> {
+	await ralphStore.update((current) => ({
+		...current,
+		model: modelRef,
+		recentModels: [
+			modelRef,
+			...(current.recentModels ?? []).filter((m) => m !== modelRef),
+		].slice(0, RECENT_MODELS_LIMIT),
+	}));
+}
 
 /**
  * Parse a "provider/model" string into { providerId, modelId }.
