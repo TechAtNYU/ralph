@@ -1,28 +1,42 @@
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { ensureDaemonRunning } from "@techatnyu/ralphd";
 import { App } from "./components/app";
+import { OnboardingError } from "./components/onboarding";
+import { runOnboardingChecks } from "./lib/onboarding";
+
+const runtime = {
+	isShuttingDown: false,
+};
 
 export async function runTui(): Promise<void> {
-	const renderer = await createCliRenderer();
-	const root = createRoot(renderer);
-	const online = await ensureDaemonRunning();
+	runtime.isShuttingDown = false;
 
-	if (!online) {
-		root.render(
-			<box alignItems="center" justifyContent="center" flexGrow={1}>
-				<text>Daemon offline. Start it with: `ralph daemon start`</text>
-			</box>,
-		);
-		return;
-	}
+	const onboarding = await runOnboardingChecks();
+
+	const renderer = await createCliRenderer({
+		onDestroy: () => {
+			runtime.isShuttingDown = true;
+		},
+	});
+	const root = createRoot(renderer);
+	let closed = false;
 
 	const close = () => {
+		if (closed) {
+			return;
+		}
+
+		closed = true;
+		runtime.isShuttingDown = true;
 		root.unmount();
 		renderer.destroy();
 	};
 
-	root.render(<App onQuit={close} />);
+	if (onboarding.ok) {
+		root.render(<App onQuit={close} />);
+	} else {
+		root.render(<OnboardingError checks={onboarding.checks} onQuit={close} />);
+	}
 }
 
 if (import.meta.main) {

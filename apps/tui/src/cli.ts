@@ -32,7 +32,7 @@ function printJson(value: unknown): void {
 }
 
 const cli = new Crust("ralph")
-	.meta({ description: "Coding Agent Ochestration TUI" })
+	.meta({ description: "Coding agent orchestration TUI" })
 	.use(helpPlugin())
 	.run(async () => {
 		await runTui();
@@ -185,7 +185,7 @@ const cli = new Crust("ralph")
 			)
 			.command("instance", (instanceCommand) =>
 				instanceCommand
-					.meta({ description: "Manage OpenCode instances" })
+					.meta({ description: "Manage daemon instances" })
 					.command("create", (cmd) =>
 						cmd
 							.meta({ description: "Create a managed instance" })

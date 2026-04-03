@@ -9,6 +9,11 @@ import type {
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useState } from "react";
 import { ralphStore } from "../store";
+import { Chat } from "./chat";
+
+type View =
+	| { type: "dashboard" }
+	| { type: "chat"; instanceId: string; instanceName: string };
 
 interface DashboardData {
 	health: HealthResult;
@@ -63,7 +68,13 @@ function countJobsByState(
 	return { running, queued };
 }
 
-export function App({ onQuit }: AppProps) {
+function Dashboard({
+	onQuit,
+	onSelectInstance,
+}: {
+	onQuit(): void;
+	onSelectInstance(instance: ManagedInstance): void;
+}) {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string>();
 	const [data, setData] = useState<DashboardData>();
@@ -119,7 +130,7 @@ export function App({ onQuit }: AppProps) {
 			return;
 		}
 
-		if (key.name === "q") {
+		if (key.name === "q" || (key.ctrl && key.name === "c")) {
 			onQuit();
 			return;
 		}
@@ -150,6 +161,14 @@ export function App({ onQuit }: AppProps) {
 		if (key.name === "up" || key.name === "k") {
 			const next = clampIndex(selectedIndex - 1, data.instances.length);
 			void refresh(next);
+			return;
+		}
+
+		if (key.name === "return") {
+			const selected = data.instances[selectedIndex];
+			if (selected) {
+				onSelectInstance(selected);
+			}
 			return;
 		}
 	});
@@ -253,9 +272,37 @@ export function App({ onQuit }: AppProps) {
 
 			<box flexDirection="column" marginTop={1}>
 				<text attributes={TextAttributes.DIM}>
-					{error ?? "j/k or arrows: select  m: model  r: refresh  q: quit"}
+					{error ?? "j/k or arrows: select  enter: chat  m: model  r: refresh  q: quit"}
 				</text>
 			</box>
 		</box>
+	);
+}
+
+export function App({ onQuit }: AppProps) {
+	const [view, setView] = useState<View>({ type: "dashboard" });
+
+	if (view.type === "chat") {
+		return (
+			<Chat
+				instanceId={view.instanceId}
+				instanceName={view.instanceName}
+				onBack={() => setView({ type: "dashboard" })}
+				onQuit={onQuit}
+			/>
+		);
+	}
+
+	return (
+		<Dashboard
+			onQuit={onQuit}
+			onSelectInstance={(instance) =>
+				setView({
+					type: "chat",
+					instanceId: instance.id,
+					instanceName: instance.name,
+				})
+			}
+		/>
 	);
 }
