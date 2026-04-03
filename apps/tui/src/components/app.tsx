@@ -61,12 +61,14 @@ async function fetchModelOptions(): Promise<SelectOption[]> {
 	const allByRef = new Map(allModels.map((m) => [m.value, m]));
 	const recentOptions: SelectOption[] = (store.recentModels ?? [])
 		.filter((ref) => allByRef.has(ref))
-		.map((ref) => allByRef.get(ref)!);
+		.map((ref) => allByRef.get(ref) as SelectOption);
 
 	if (recentOptions.length === 0) return allModels;
 
 	// Filter recents out of the "all" section to avoid duplicates
-	const restModels = allModels.filter((m) => !recentRefs.has(m.value as string));
+	const restModels = allModels.filter(
+		(m) => !recentRefs.has(m.value as string),
+	);
 
 	return [
 		{ name: "── Recent ──", description: "", value: SEPARATOR_VALUE },
@@ -305,7 +307,8 @@ function Dashboard({
 
 			<box flexDirection="column" marginTop={1}>
 				<text attributes={TextAttributes.DIM}>
-					{error ?? "j/k or arrows: select  enter: chat  m: model  r: refresh  q: quit"}
+					{error ??
+						"j/k or arrows: select  enter: chat  m: model  r: refresh  q: quit"}
 				</text>
 			</box>
 		</box>

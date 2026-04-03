@@ -28,7 +28,6 @@ interface ChatProps {
 const JOB_POLL_INTERVAL_MS = 500;
 
 async function waitForJob(jobId: string): Promise<DaemonJob> {
-	// biome-ignore lint/correctness/noConstantCondition: polling loop
 	while (true) {
 		const result = await daemon.getJob(jobId);
 		if (
