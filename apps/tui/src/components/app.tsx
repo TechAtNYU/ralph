@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { TextAttributes } from "@opentui/core";
+import { type SelectOption, TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import type {
 	DaemonJob,
@@ -8,6 +8,7 @@ import type {
 } from "@techatnyu/ralphd";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useState } from "react";
+import { ralphStore, setModelAndRecent } from "../store";
 import { Chat } from "./chat";
 
 type View =
@@ -18,6 +19,63 @@ interface DashboardData {
 	health: HealthResult;
 	instances: ManagedInstance[];
 	jobs: DaemonJob[];
+}
+
+/** Provider IDs sorted by popularity — used to push well-known providers to the top. */
+const PROVIDER_PRIORITY: Record<string, number> = {
+	anthropic: 0,
+	openai: 1,
+	google: 2,
+	openrouter: 3,
+};
+
+const SEPARATOR_VALUE = "__separator__";
+
+async function fetchModelOptions(): Promise<SelectOption[]> {
+	const [result, store] = await Promise.all([
+		daemon.providerList({ refresh: true }),
+		ralphStore.read(),
+	]);
+	const connected = new Set(result.connected);
+	const recentRefs = new Set(store.recentModels ?? []);
+
+	// Build flat list of all connected models
+	const allModels: SelectOption[] = result.providers
+		.filter((provider) => connected.has(provider.id))
+		.sort(
+			(a, b) =>
+				(PROVIDER_PRIORITY[a.id] ?? 99) - (PROVIDER_PRIORITY[b.id] ?? 99) ||
+				a.name.localeCompare(b.name),
+		)
+		.flatMap((provider) =>
+			Object.values(provider.models)
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map((model) => ({
+					name: `${provider.name}/${model.name}`,
+					description: `${provider.id}/${model.id}`,
+					value: `${provider.id}/${model.id}`,
+				})),
+		);
+
+	// Build recent section from stored order, only including models that still exist
+	const allByRef = new Map(allModels.map((m) => [m.value, m]));
+	const recentOptions: SelectOption[] = (store.recentModels ?? [])
+		.filter((ref) => allByRef.has(ref))
+		.map((ref) => allByRef.get(ref) as SelectOption);
+
+	if (recentOptions.length === 0) return allModels;
+
+	// Filter recents out of the "all" section to avoid duplicates
+	const restModels = allModels.filter(
+		(m) => !recentRefs.has(m.value as string),
+	);
+
+	return [
+		{ name: "── Recent ──", description: "", value: SEPARATOR_VALUE },
+		...recentOptions,
+		{ name: "── All Models ──", description: "", value: SEPARATOR_VALUE },
+		...restModels,
+	];
 }
 
 interface AppProps {
@@ -56,16 +114,22 @@ function Dashboard({
 	const [error, setError] = useState<string>();
 	const [data, setData] = useState<DashboardData>();
 	const [selectedIndex, setSelectedIndex] = useState(0);
+	const [currentModel, setCurrentModel] = useState("");
+	const [modelPicker, setModelPicker] = useState(false);
+	const [modelOptions, setModelOptions] = useState<SelectOption[]>([]);
+	const [fetchingModels, setFetchingModels] = useState(false);
 
 	const refresh = useCallback(
 		async (nextIndex = selectedIndex) => {
 			setLoading(true);
 			setError(undefined);
 			try {
-				const [health, instanceList] = await Promise.all([
+				const [health, instanceList, storeState] = await Promise.all([
 					daemon.health(),
 					daemon.listInstances(),
+					ralphStore.read(),
 				]);
+				setCurrentModel(storeState.model);
 				const safeIndex = clampIndex(nextIndex, instanceList.instances.length);
 				const selected = instanceList.instances[safeIndex];
 				const jobs = await daemon.listJobs(
@@ -95,6 +159,13 @@ function Dashboard({
 	}, [refresh]);
 
 	useKeyboard((key) => {
+		if (modelPicker) {
+			if (key.name === "escape" || key.name === "q") {
+				setModelPicker(false);
+			}
+			return;
+		}
+
 		if (key.name === "q" || (key.ctrl && key.name === "c")) {
 			onQuit();
 			return;
@@ -102,6 +173,22 @@ function Dashboard({
 
 		if (key.name === "r") {
 			void refresh();
+			return;
+		}
+
+		if (key.name === "m" && !fetchingModels) {
+			setFetchingModels(true);
+			void fetchModelOptions()
+				.then((options) => {
+					setModelOptions(options);
+					setModelPicker(true);
+				})
+				.catch((err) => {
+					setError(
+						err instanceof Error ? err.message : "Failed to fetch models",
+					);
+				})
+				.finally(() => setFetchingModels(false));
 			return;
 		}
 
@@ -132,6 +219,36 @@ function Dashboard({
 
 	const selected = data?.instances[selectedIndex];
 
+	if (modelPicker) {
+		return (
+			<box flexDirection="column" flexGrow={1} padding={1}>
+				<box flexDirection="column" marginBottom={1}>
+					<text attributes={TextAttributes.BOLD}>Select Model</text>
+					<text attributes={TextAttributes.DIM}>
+						{`${modelOptions.length} models available — esc: cancel`}
+					</text>
+				</box>
+				<select
+					focused
+					flexGrow={1}
+					options={modelOptions}
+					showDescription
+					showScrollIndicator
+					wrapSelection
+					onSelect={(_index, option) => {
+						if (option?.value && option.value !== SEPARATOR_VALUE) {
+							const modelRef = option.value as string;
+							void setModelAndRecent(modelRef).then(() => {
+								setCurrentModel(modelRef);
+								setModelPicker(false);
+							});
+						}
+					}}
+				/>
+			</box>
+		);
+	}
+
 	return (
 		<box flexDirection="column" flexGrow={1} padding={1}>
 			<box flexDirection="column" marginBottom={1}>
@@ -145,7 +262,7 @@ function Dashboard({
 				</text>
 				<text attributes={TextAttributes.DIM}>
 					{data
-						? `${data.health.running} running, ${data.health.queued} queued`
+						? `${data.health.running} running, ${data.health.queued} queued | Model: ${currentModel || "default"}`
 						: (error ?? "No data available")}
 				</text>
 			</box>
@@ -199,7 +316,8 @@ function Dashboard({
 
 			<box flexDirection="column" marginTop={1}>
 				<text attributes={TextAttributes.DIM}>
-					{error ?? "j/k or arrows: select  enter: chat  r: refresh  q: quit"}
+					{error ??
+						"j/k or arrows: select  enter: chat  m: model  r: refresh  q: quit"}
 				</text>
 			</box>
 		</box>

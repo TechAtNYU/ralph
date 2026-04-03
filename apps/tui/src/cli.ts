@@ -9,6 +9,7 @@ import {
 	waitUntilReady,
 } from "@techatnyu/ralphd";
 import { runTui } from "./index";
+import { parseModelRef, ralphStore, setModelAndRecent } from "./store";
 
 async function requireDaemon(): Promise<void> {
 	const running = await daemon.isDaemonRunning();
@@ -107,6 +108,8 @@ const cli = new Crust("ralph")
 					.run(
 						withDaemon(async ({ args, flags }) => {
 							const prompt = args.prompt.join(" ").trim();
+							const stored = await ralphStore.read();
+							const model = parseModelRef(stored.model);
 							const result = await daemon.submitJob({
 								instanceId: flags.instance,
 								session: flags.session
@@ -115,6 +118,7 @@ const cli = new Crust("ralph")
 								task: {
 									type: "prompt",
 									prompt,
+									model,
 								},
 							});
 							printJson(result);
@@ -291,6 +295,39 @@ const cli = new Crust("ralph")
 								}),
 							),
 					),
+			),
+	)
+	.command("model", (modelCommand) =>
+		modelCommand
+			.meta({ description: "Manage model selection" })
+			.command("set", (cmd) =>
+				cmd
+					.meta({ description: "Set the active model" })
+					.args([
+						{
+							name: "model",
+							type: "string",
+							required: true,
+							description:
+								"Model in provider/model format (e.g. anthropic/claude-sonnet-4-5)",
+						},
+					])
+					.run(async ({ args }) => {
+						const parsed = parseModelRef(args.model);
+						if (!parsed) {
+							throw new Error(
+								"Invalid model format. Use provider/model (e.g. anthropic/claude-sonnet-4-5)",
+							);
+						}
+						await setModelAndRecent(args.model);
+						console.log(`Model set to: ${args.model}`);
+					}),
+			)
+			.command("get", (cmd) =>
+				cmd.meta({ description: "Show the active model" }).run(async () => {
+					const { model } = await ralphStore.read();
+					console.log(model || "No model set (using SDK default)");
+				}),
 			),
 	);
 
