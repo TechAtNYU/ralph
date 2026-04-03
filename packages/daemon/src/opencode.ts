@@ -201,9 +201,7 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 		return this.ensureStarted(SYSTEM_INSTANCE_ID);
 	}
 
-	private async healthCheck(
-		runtime: ManagedOpencodeRuntime,
-	): Promise<boolean> {
+	private async healthCheck(runtime: ManagedOpencodeRuntime): Promise<boolean> {
 		try {
 			await runtime.client.provider.list();
 			return true;
@@ -212,9 +210,7 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 		}
 	}
 
-	async queryProviders(
-		directory?: string,
-	): Promise<ProviderListResult> {
+	async queryProviders(directory?: string): Promise<ProviderListResult> {
 		// Prefer an existing user runtime if one is available
 		for (const [id, entry] of this.runtimes.entries()) {
 			if (id !== SYSTEM_INSTANCE_ID && entry.runtime) {

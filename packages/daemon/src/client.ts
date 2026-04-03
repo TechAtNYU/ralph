@@ -178,12 +178,9 @@ export class DaemonClient {
 	}
 
 	providerList(params: ParamsByMethod<"provider.list"> = {}) {
-		return send(
-			this.socketPath,
-			"provider.list",
-			params,
-			30_000,
-		) as Promise<ResultByMethod<"provider.list">>;
+		return send(this.socketPath, "provider.list", params, 30_000) as Promise<
+			ResultByMethod<"provider.list">
+		>;
 	}
 
 	submitJob(params: ParamsByMethod<"job.submit">) {

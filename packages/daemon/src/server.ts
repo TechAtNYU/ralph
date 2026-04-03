@@ -25,6 +25,7 @@ import {
 	type ListResult,
 	type ManagedInstance,
 	normalizeIssues,
+	type ProviderListResult,
 	type RequestByMethod,
 	type RequestMessage,
 	RequestMessage as RequestMessageSchema,
@@ -33,7 +34,6 @@ import {
 	type ResponseMessage,
 	type ResultByMethod,
 	type ShutdownResult,
-	type ProviderListResult,
 	type SubmitResult,
 } from "./protocol";
 import { StateStore, StoreError } from "./store";
