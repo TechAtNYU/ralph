@@ -57,6 +57,7 @@ export interface OpencodeRuntimeClient {
 	provider: {
 		list(parameters?: { directory?: string }): Promise<ProviderListResult>;
 	};
+	ping(): Promise<boolean>;
 }
 
 export interface ManagedOpencodeRuntime {
@@ -147,6 +148,14 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 							};
 						},
 					},
+					async ping() {
+						try {
+							await client.path.get({}, { throwOnError: true });
+							return true;
+						} catch {
+							return false;
+						}
+					},
 				},
 				server,
 			};
@@ -202,19 +211,16 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 	}
 
 	private async healthCheck(runtime: ManagedOpencodeRuntime): Promise<boolean> {
-		try {
-			await runtime.client.provider.list();
-			return true;
-		} catch {
-			return false;
-		}
+		return runtime.client.ping();
 	}
 
 	async queryProviders(directory?: string): Promise<ProviderListResult> {
 		// Prefer an existing user runtime if one is available
 		for (const [id, entry] of this.runtimes.entries()) {
 			if (id !== SYSTEM_INSTANCE_ID && entry.runtime) {
-				return entry.runtime.client.provider.list({ directory });
+				try {
+					return await entry.runtime.client.provider.list({ directory });
+				} catch {}
 			}
 		}
 

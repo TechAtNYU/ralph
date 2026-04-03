@@ -131,6 +131,9 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 						connected: [],
 					}),
 				},
+				async ping() {
+					return true;
+				},
 			},
 			server: {
 				url: `fake://${instanceId}`,
