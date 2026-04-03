@@ -33,7 +33,7 @@ const SEPARATOR_VALUE = "__separator__";
 
 async function fetchModelOptions(): Promise<SelectOption[]> {
 	const [result, store] = await Promise.all([
-		daemon.providerList(),
+		daemon.providerList({ refresh: true }),
 		ralphStore.read(),
 	]);
 	const connected = new Set(result.connected);

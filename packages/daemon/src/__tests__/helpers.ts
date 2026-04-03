@@ -160,7 +160,7 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 		this.runtimes.clear();
 	}
 
-	async queryProviders() {
+	async queryProviders(_directory?: string, _refresh?: boolean) {
 		return { providers: [], connected: [] };
 	}
 }

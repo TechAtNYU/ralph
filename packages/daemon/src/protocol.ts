@@ -130,6 +130,9 @@ export type InstanceRemoveParams = z.infer<typeof InstanceRemoveParams>;
 
 const ProviderListParams = z.strictObject({
 	directory: z.string().min(1).optional(),
+	/** When true, dispose the cached OpenCode instance before querying so
+	 *  provider data (including newly-connected credentials) is re-read. */
+	refresh: z.boolean().optional(),
 });
 export type ProviderListParams = z.infer<typeof ProviderListParams>;
 

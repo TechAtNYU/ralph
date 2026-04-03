@@ -298,7 +298,10 @@ export class Daemon {
 	private async handleProviderList(
 		request: RequestByMethod<"provider.list">,
 	): Promise<ProviderListResult> {
-		return this.registry.queryProviders(request.params.directory);
+		return this.registry.queryProviders(
+			request.params.directory,
+			request.params.refresh,
+		);
 	}
 
 	private async handleJobSubmit(

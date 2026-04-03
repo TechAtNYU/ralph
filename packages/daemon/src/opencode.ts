@@ -74,7 +74,10 @@ export interface OpencodeRuntimeManager {
 	isRunning(instanceId: string): boolean;
 	stop(instanceId: string): Promise<void>;
 	stopAll(): Promise<void>;
-	queryProviders(directory?: string): Promise<ProviderListResult>;
+	queryProviders(
+		directory?: string,
+		refresh?: boolean,
+	): Promise<ProviderListResult>;
 }
 
 interface RuntimeEntry {
@@ -214,7 +217,22 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 		return runtime.client.ping();
 	}
 
-	async queryProviders(directory?: string): Promise<ProviderListResult> {
+	async queryProviders(
+		directory?: string,
+		refresh?: boolean,
+	): Promise<ProviderListResult> {
+		// When refresh is requested, dispose the runtime's internal instance so
+		// OpenCode re-reads auth.json and rebuilds its provider cache.
+		if (refresh) {
+			const runtime = await this.ensureSystemRuntime();
+			try {
+				await runtime.client.instance.dispose();
+			} catch {
+				// dispose may fail if the instance was already gone — ignore
+			}
+			return runtime.client.provider.list({ directory });
+		}
+
 		// Prefer an existing user runtime if one is available
 		for (const [id, entry] of this.runtimes.entries()) {
 			if (id !== SYSTEM_INSTANCE_ID && entry.runtime) {
