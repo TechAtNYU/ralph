@@ -117,6 +117,7 @@ function Dashboard({
 	const [currentModel, setCurrentModel] = useState("");
 	const [modelPicker, setModelPicker] = useState(false);
 	const [modelOptions, setModelOptions] = useState<SelectOption[]>([]);
+	const [fetchingModels, setFetchingModels] = useState(false);
 
 	const refresh = useCallback(
 		async (nextIndex = selectedIndex) => {
@@ -175,11 +176,19 @@ function Dashboard({
 			return;
 		}
 
-		if (key.name === "m") {
-			void fetchModelOptions().then((options) => {
-				setModelOptions(options);
-				setModelPicker(true);
-			});
+		if (key.name === "m" && !fetchingModels) {
+			setFetchingModels(true);
+			void fetchModelOptions()
+				.then((options) => {
+					setModelOptions(options);
+					setModelPicker(true);
+				})
+				.catch((err) => {
+					setError(
+						err instanceof Error ? err.message : "Failed to fetch models",
+					);
+				})
+				.finally(() => setFetchingModels(false));
 			return;
 		}
 
