@@ -78,7 +78,7 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 				session: {
 					create: async () => {
 						const id = `session-${instanceId}-${this.sessionSequence++}`;
-						return { data: fakeSession({ id }) };
+						return fakeSession({ id });
 					},
 					prompt: async (parameters) => {
 						const sessionId = parameters.sessionID;
@@ -111,10 +111,8 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 							}
 							const messageId = `message-${this.messageSequence++}`;
 							return {
-								data: {
-									info: fakeAssistantMessage({ id: messageId }),
-									parts: [fakeTextPart({ text: `reply:${prompt}` })],
-								},
+								info: fakeAssistantMessage({ id: messageId }),
+								parts: [fakeTextPart({ text: `reply:${prompt}` })],
 							};
 						} finally {
 							this.activeByInstance.set(instanceId, active - 1);
