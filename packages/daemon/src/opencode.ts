@@ -7,10 +7,7 @@ import {
 } from "@opencode-ai/sdk/v2";
 
 export interface OpencodeSessionClient {
-	create(parameters: {
-		directory?: string;
-		title?: string;
-	}): Promise<{ data: Session }>;
+	create(parameters: { directory?: string; title?: string }): Promise<Session>;
 	prompt(parameters: {
 		sessionID: string;
 		directory?: string;
@@ -22,7 +19,7 @@ export interface OpencodeSessionClient {
 		system?: string;
 		variant?: string;
 		parts?: Array<TextPartInput>;
-	}): Promise<{ data: { info: AssistantMessage; parts: Part[] } }>;
+	}): Promise<{ info: AssistantMessage; parts: Part[] }>;
 	abort(parameters: {
 		sessionID: string;
 		directory?: string;
@@ -44,12 +41,23 @@ export interface ManagedOpencodeRuntime {
 	};
 }
 
+export interface OpencodeRuntimeEvent {
+	type: string;
+	properties: Record<string, unknown>;
+}
+
 export interface OpencodeRuntimeManager {
 	ensureStarted(instanceId: string): Promise<ManagedOpencodeRuntime>;
 	get(instanceId: string): ManagedOpencodeRuntime | undefined;
 	isRunning(instanceId: string): boolean;
 	stop(instanceId: string): Promise<void>;
 	stopAll(): Promise<void>;
+	/** Register the handler that receives every event surfaced by managed
+	 * runtimes. Called by the Daemon during construction so that wiring is
+	 * uniform regardless of whether the registry was injected or default. */
+	setOnEvent(
+		handler: (instanceId: string, event: OpencodeRuntimeEvent) => void,
+	): void;
 }
 
 interface RuntimeEntry {
@@ -59,6 +67,14 @@ interface RuntimeEntry {
 
 export class OpencodeRegistry implements OpencodeRuntimeManager {
 	private readonly runtimes = new Map<string, RuntimeEntry>();
+	private readonly eventSubscriptions = new Map<string, { cancel(): void }>();
+	private onEvent?: (instanceId: string, event: OpencodeRuntimeEvent) => void;
+
+	setOnEvent(
+		handler: (instanceId: string, event: OpencodeRuntimeEvent) => void,
+	): void {
+		this.onEvent = handler;
+	}
 
 	async ensureStarted(instanceId: string): Promise<ManagedOpencodeRuntime> {
 		const entry = this.runtimes.get(instanceId);
@@ -70,7 +86,11 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 			return entry.starting;
 		}
 
-		const starting = createOpencode().then(({ client, server }) => {
+		const starting = createOpencode().then(async ({ client, server }) => {
+			const events = await client.event.subscribe();
+			const subscription = this.consumeEvents(instanceId, events);
+			this.eventSubscriptions.set(instanceId, subscription);
+
 			const runtime: ManagedOpencodeRuntime = {
 				client: {
 					instance: {
@@ -78,16 +98,21 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 					},
 					session: {
 						create: async (parameters) => {
-							return await client.session.create(parameters, {
+							const res = await client.session.create(parameters, {
 								throwOnError: true,
 								responseStyle: "data",
 							});
+							return res as unknown as Session;
 						},
 						prompt: async (parameters) => {
-							return await client.session.prompt(parameters, {
+							const res = await client.session.prompt(parameters, {
 								throwOnError: true,
 								responseStyle: "data",
 							});
+							return res as unknown as {
+								info: AssistantMessage;
+								parts: Part[];
+							};
 						},
 						abort: (parameters) =>
 							client.session.abort(parameters, {
@@ -110,6 +135,30 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 		}
 	}
 
+	private consumeEvents(
+		instanceId: string,
+		events: { stream: AsyncIterable<OpencodeRuntimeEvent> },
+	): { cancel(): void } {
+		let stopped = false;
+
+		(async () => {
+			try {
+				for await (const event of events.stream) {
+					if (stopped) break;
+					this.onEvent?.(instanceId, event);
+				}
+			} catch {
+				// Event stream ended or errored — nothing to do.
+			}
+		})();
+
+		return {
+			cancel: () => {
+				stopped = true;
+			},
+		};
+	}
+
 	get(instanceId: string): ManagedOpencodeRuntime | undefined {
 		return this.runtimes.get(instanceId)?.runtime;
 	}
@@ -119,6 +168,9 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 	}
 
 	async stop(instanceId: string): Promise<void> {
+		this.eventSubscriptions.get(instanceId)?.cancel();
+		this.eventSubscriptions.delete(instanceId);
+
 		const entry = this.runtimes.get(instanceId);
 		if (!entry) {
 			return;

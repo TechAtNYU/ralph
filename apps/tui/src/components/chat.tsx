@@ -1,7 +1,6 @@
 import type { ScrollBoxRenderable } from "@opentui/core";
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
-import type { DaemonJob } from "@techatnyu/ralphd";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useMemo, useRef, useState } from "react";
 
@@ -23,23 +22,6 @@ interface ChatProps {
 	instanceName: string;
 	onBack(): void;
 	onQuit(): void;
-}
-
-const JOB_POLL_INTERVAL_MS = 500;
-
-async function waitForJob(jobId: string): Promise<DaemonJob> {
-	// biome-ignore lint/correctness/noConstantCondition: polling loop
-	while (true) {
-		const result = await daemon.getJob(jobId);
-		if (
-			result.job.state === "succeeded" ||
-			result.job.state === "failed" ||
-			result.job.state === "cancelled"
-		) {
-			return result.job;
-		}
-		await Bun.sleep(JOB_POLL_INTERVAL_MS);
-	}
 }
 
 export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
@@ -109,6 +91,8 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 			setMessages((prev) => [...prev, msg("user", trimmedValue)]);
 			setIsLoading(true);
 
+			const placeholder = msg("assistant", "");
+
 			try {
 				const session:
 					| { type: "new" }
@@ -125,22 +109,84 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 					},
 				});
 
-				const finished = await waitForJob(submitted.job.id);
+				setMessages((prev) => [...prev, placeholder]);
 
-				// Track the session for follow-up messages
-				if (finished.sessionId && !sessionId) {
-					setSessionId(finished.sessionId);
-				}
+				for await (const event of daemon.streamJob(submitted.job.id)) {
+					if (event.type === "snapshot") {
+						// Replace placeholder content with the daemon's current
+						// accumulated text. Sent once on subscribe so late joiners
+						// catch up before live deltas start streaming.
+						setMessages((prev) =>
+							prev.map((m) =>
+								m.id === placeholder.id ? { ...m, content: event.text } : m,
+							),
+						);
+					} else if (event.type === "delta" && event.field === "text") {
+						setMessages((prev) =>
+							prev.map((m) =>
+								m.id === placeholder.id
+									? { ...m, content: m.content + event.delta }
+									: m,
+							),
+						);
+					} else if (event.type === "done") {
+						if (event.job.sessionId && !sessionId) {
+							setSessionId(event.job.sessionId);
+						}
 
-				if (finished.state === "succeeded") {
-					const output = finished.outputText?.trim() || "(empty response)";
-					setMessages((prev) => [...prev, msg("assistant", output)]);
-				} else if (finished.state === "cancelled") {
-					setMessages((prev) => [...prev, msg("system", "Job was cancelled.")]);
-				} else {
-					const errMsg = finished.error ?? "Job failed with no error message.";
-					setErrorMessage(errMsg);
-					setMessages((prev) => [...prev, msg("system", `Error: ${errMsg}`)]);
+						if (event.job.state === "succeeded") {
+							// Use outputText as fallback if no deltas were received
+							setMessages((prev) =>
+								prev.map((m) =>
+									m.id === placeholder.id && !m.content.trim()
+										? {
+												...m,
+												content:
+													event.job.outputText?.trim() || "(empty response)",
+											}
+										: m,
+								),
+							);
+						} else if (event.job.state === "cancelled") {
+							setMessages((prev) =>
+								prev.map((m) =>
+									m.id === placeholder.id
+										? {
+												...m,
+												role: "system",
+												content: "Job was cancelled.",
+											}
+										: m,
+								),
+							);
+						} else {
+							const errMsg =
+								event.job.error ?? "Job failed with no error message.";
+							setErrorMessage(errMsg);
+							setMessages((prev) =>
+								prev.map((m) =>
+									m.id === placeholder.id
+										? { ...m, role: "system", content: `Error: ${errMsg}` }
+										: m,
+								),
+							);
+						}
+						break;
+					} else if (event.type === "error") {
+						setErrorMessage(event.error);
+						setMessages((prev) =>
+							prev.map((m) =>
+								m.id === placeholder.id
+									? {
+											...m,
+											role: "system",
+											content: `Error: ${event.error}`,
+										}
+									: m,
+							),
+						);
+						break;
+					}
 				}
 			} catch (error) {
 				const message =

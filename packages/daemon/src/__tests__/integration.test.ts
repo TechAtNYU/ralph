@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { DaemonClient } from "../client";
-import type { DaemonJob } from "../protocol";
+import type { DaemonJob, JobStreamEvent } from "../protocol";
 import { createConnectionHandler, Daemon } from "../server";
 import { StateStore } from "../store";
 import { FakeOpencodeRegistry } from "./helpers";
@@ -15,13 +15,15 @@ describe("Integration: server + client over Unix socket", () => {
 	let testSocketPath: string;
 	let server: Server;
 	let daemon: Daemon;
+	let registry: FakeOpencodeRegistry;
 	let client: DaemonClient;
 
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(join(tmpdir(), "ralph-integration-"));
 		testSocketPath = join(tmpDir, "test.sock");
 		const store = new StateStore(join(tmpDir, "state.json"));
-		daemon = new Daemon(store, { registry: new FakeOpencodeRegistry(20) });
+		registry = new FakeOpencodeRegistry(20);
+		daemon = new Daemon(store, { registry });
 		await daemon.bootstrap();
 
 		server = createServer(createConnectionHandler(daemon));
@@ -84,5 +86,61 @@ describe("Integration: server + client over Unix socket", () => {
 		await expect(client.getJob("missing")).rejects.toThrow(
 			"job missing not found",
 		);
+	});
+
+	test("client.streamJob streams snapshot, deltas, and done end-to-end", async () => {
+		registry.streamingDeltas = ["red ", "green ", "blue"];
+		registry.deltaIntervalMs = 10;
+
+		const created = await client.createInstance({
+			name: "stream-instance",
+			directory: "/tmp/project-stream",
+		});
+		const submitted = await client.submitJob({
+			instanceId: created.instance.id,
+			session: { type: "new" },
+			task: { type: "prompt", prompt: "stream me" },
+		});
+
+		const events: JobStreamEvent[] = [];
+		for await (const event of client.streamJob(submitted.job.id)) {
+			events.push(event);
+		}
+
+		const types = events.map((e) => e.type);
+		expect(types[0]).toBe("snapshot");
+		expect(types[types.length - 1]).toBe("done");
+		expect(types).toContain("delta");
+
+		const done = events[events.length - 1];
+		if (done?.type !== "done") throw new Error("expected done event");
+		expect(done.job.state).toBe("succeeded");
+		expect(done.job.outputText).toBe("red green blue");
+	});
+
+	test("client.streamJob returns immediately for an already-terminal job", async () => {
+		// No streaming deltas — fake completes quickly with default delay.
+		const created = await client.createInstance({
+			name: "fast-instance",
+			directory: "/tmp/project-fast",
+		});
+		const submitted = await client.submitJob({
+			instanceId: created.instance.id,
+			session: { type: "new" },
+			task: { type: "prompt", prompt: "fast" },
+		});
+
+		// Wait for the job to finish.
+		await Bun.sleep(100);
+
+		const events: JobStreamEvent[] = [];
+		for await (const event of client.streamJob(submitted.job.id)) {
+			events.push(event);
+		}
+
+		// Terminal jobs short-circuit: just a done event, no snapshot or
+		// deltas.
+		expect(events).toHaveLength(1);
+		expect(events[0]?.type).toBe("done");
 	});
 });
