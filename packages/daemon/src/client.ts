@@ -1,7 +1,9 @@
 import { access } from "node:fs/promises";
 import { connect } from "node:net";
+import { createInterface } from "node:readline";
 
 import {
+	type JobStreamEvent,
 	type ParamsByMethod,
 	RequestMessage as RequestMessageSchema,
 	type RequestMethod,
@@ -84,6 +86,10 @@ function send<M extends RequestMethod>(
 					finish(new Error(parsed.error.message));
 					return;
 				}
+
+				// Stream-event envelopes don't carry a `result` field; they
+				// only flow through streamJob, never the one-shot send() path.
+				if (!("result" in parsed)) continue;
 
 				finish(undefined, parsed.result);
 				return;
@@ -199,6 +205,69 @@ export class DaemonClient {
 		return send(this.socketPath, "job.cancel", { jobId }) as Promise<
 			ResultByMethod<"job.cancel">
 		>;
+	}
+
+	/**
+	 * Open a stream over the daemon socket and yield job events as they
+	 * arrive. The first line on the wire is the ack response; every
+	 * subsequent line is a JobStreamEventMessage envelope wrapping a
+	 * JobStreamEvent. The generator returns when a `done` or `error` event
+	 * is received, or when the socket closes.
+	 */
+	async *streamJob(jobId: string): AsyncGenerator<JobStreamEvent> {
+		const request = RequestMessageSchema.parse({
+			id: Bun.randomUUIDv7(),
+			method: "job.stream",
+			params: { jobId },
+		});
+
+		const socket = connect(this.socketPath);
+		socket.setEncoding("utf8");
+		socket.on("error", () => {});
+		const rl = createInterface({ input: socket });
+
+		try {
+			socket.write(`${JSON.stringify(request)}\n`);
+
+			let acked = false;
+			for await (const line of rl) {
+				if (!line.trim()) continue;
+
+				let parsed: unknown;
+				try {
+					parsed = JSON.parse(line) as unknown;
+				} catch {
+					throw new Error("invalid daemon response");
+				}
+
+				const response = ResponseMessageSchema.safeParse(parsed);
+				if (!response.success) {
+					throw new Error("invalid daemon response");
+				}
+
+				const data = response.data;
+				if (data.id !== request.id) continue;
+
+				if (!data.ok) {
+					throw new Error(data.error.message);
+				}
+
+				if (!acked) {
+					// First success line is the stream ack — no event payload.
+					acked = true;
+					continue;
+				}
+
+				if (!("event" in data)) continue;
+				yield data.event;
+				if (data.event.type === "done" || data.event.type === "error") {
+					return;
+				}
+			}
+		} finally {
+			rl.close();
+			socket.destroy();
+		}
 	}
 }
 
