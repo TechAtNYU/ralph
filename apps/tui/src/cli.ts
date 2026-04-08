@@ -1,6 +1,5 @@
 import { Crust } from "@crustjs/core";
 import { helpPlugin } from "@crustjs/plugins";
-import { bootstrapRalphWorkspace } from "./scaffold";
 import {
 	daemon,
 	type JobState,
@@ -10,6 +9,7 @@ import {
 	waitUntilReady,
 } from "@techatnyu/ralphd";
 import { runTui } from "./index";
+import { bootstrapRalphWorkspace } from "./scaffold";
 
 async function requireDaemon(): Promise<void> {
 	const running = await daemon.isDaemonRunning();
@@ -38,20 +38,20 @@ const cli = new Crust("ralph")
 		await runTui();
 	})
 	.command("init", (cmd) =>
-	cmd
-		.meta({ description: "Create a Ralph workspace for a project" })
-		.args([
-			{
-				name: "directory",
-				type: "string",
-				required: true,
-				description: "Project directory where .ralph will be created",
-			},
-		])
-		.run(async ({ args }) => {
-			await bootstrapRalphWorkspace(args.directory);
-			console.log(`Created Ralph workspace in ${args.directory}/.ralph`);
-		}),
+		cmd
+			.meta({ description: "Create a Ralph workspace for a project" })
+			.args([
+				{
+					name: "directory",
+					type: "string",
+					required: true,
+					description: "Project directory where .ralph will be created",
+				},
+			])
+			.run(async ({ args }) => {
+				await bootstrapRalphWorkspace(args.directory);
+				console.log(`Created Ralph workspace in ${args.directory}/.ralph`);
+			}),
 	)
 	.command("daemon", (daemonCommand) =>
 		daemonCommand
