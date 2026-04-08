@@ -1,6 +1,4 @@
 import { TextAttributes } from "@opentui/core";
-import { useKeyboard } from "@opentui/react";
-import { useState } from "react";
 
 export interface SlashCommand {
 	name: string;
@@ -10,52 +8,26 @@ export interface SlashCommand {
 export const SLASH_COMMANDS: SlashCommand[] = [
 	{ name: "/spec", description: "Generate a project spec" },
 	{ name: "/prd", description: "Break spec into tasks" },
+	{ name: "/prompt", description: "Generate execution prompt" },
 	{ name: "/tasks", description: "Toggle task overlay" },
 	{ name: "/clear", description: "Clear chat messages" },
 ];
 
+export function filterCommands(query: string): SlashCommand[] {
+	return SLASH_COMMANDS.filter((cmd) =>
+		cmd.name.toLowerCase().includes(`/${query.toLowerCase()}`),
+	);
+}
+
 interface CommandPaletteProps {
-	query: string;
-	onSelect: (command: SlashCommand) => void;
-	onDismiss: () => void;
-	focused: boolean;
+	commands: SlashCommand[];
+	selectedIndex: number;
 }
 
 export function CommandPalette({
-	query,
-	onSelect,
-	onDismiss,
-	focused,
+	commands: filtered,
+	selectedIndex,
 }: CommandPaletteProps) {
-	const [selectedIndex, setSelectedIndex] = useState(0);
-
-	const filtered = SLASH_COMMANDS.filter((cmd) =>
-		cmd.name.toLowerCase().includes(`/${query.toLowerCase()}`),
-	);
-
-	useKeyboard((key) => {
-		if (!focused) return;
-		if (key.name === "escape") {
-			onDismiss();
-			return;
-		}
-		if (key.name === "down" || (key.name === "j" && key.ctrl)) {
-			setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1));
-			return;
-		}
-		if (key.name === "up" || (key.name === "k" && key.ctrl)) {
-			setSelectedIndex((i) => Math.max(i - 1, 0));
-			return;
-		}
-		if (key.name === "return") {
-			const selected = filtered[selectedIndex];
-			if (selected) {
-				onSelect(selected);
-			}
-			return;
-		}
-	});
-
 	if (filtered.length === 0) {
 		return (
 			<box

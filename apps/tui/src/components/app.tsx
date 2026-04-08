@@ -61,7 +61,9 @@ export function App({ onQuit }: AppProps) {
 		}
 
 		if (key.name === "tab") {
-			setFocusZone((z) => (z === "tabs" ? "content" : "tabs"));
+			if (focusZone === "tabs") {
+				setFocusZone("content");
+			}
 			return;
 		}
 
@@ -73,33 +75,6 @@ export function App({ onQuit }: AppProps) {
 		if (focusZone === "tabs") {
 			if (key.name === "q") {
 				onQuit();
-				return;
-			}
-			if (key.name === "left" || key.name === "h") {
-				setActiveTab((t) => Math.max(0, t - 1));
-				return;
-			}
-			if (key.name === "right" || key.name === "l") {
-				setActiveTab((t) => Math.min(TAB_OPTIONS.length - 1, t + 1));
-				return;
-			}
-			if (key.name === "return") {
-				setFocusZone("content");
-				return;
-			}
-			if (key.name === "1") {
-				setActiveTab(0);
-				setFocusZone("content");
-				return;
-			}
-			if (key.name === "2") {
-				setActiveTab(1);
-				setFocusZone("content");
-				return;
-			}
-			if (key.name === "3") {
-				setActiveTab(2);
-				setFocusZone("content");
 				return;
 			}
 			if (key.name === "?") {
