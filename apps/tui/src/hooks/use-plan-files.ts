@@ -18,6 +18,7 @@ export interface PlanFilesData {
 	progress: string;
 	hasSpec: boolean;
 	hasPrd: boolean;
+	hasPrompt: boolean;
 }
 
 interface UsePlanFilesReturn {
@@ -31,6 +32,7 @@ const RALPH_DIR = join(process.cwd(), ".ralph");
 const PRD_PATH = join(RALPH_DIR, "prd.json");
 const PROGRESS_PATH = join(RALPH_DIR, "progress.md");
 const SPEC_PATH = join(RALPH_DIR, "SPEC.md");
+const PROMPT_PATH = join(RALPH_DIR, "PROMPT.md");
 
 function readFileAsync(path: string): Promise<string | null> {
 	return new Promise((resolve) => {
@@ -63,6 +65,7 @@ export function usePlanFiles(): UsePlanFilesReturn {
 		progress: "",
 		hasSpec: false,
 		hasPrd: false,
+		hasPrompt: false,
 	});
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string>();
@@ -72,16 +75,19 @@ export function usePlanFiles(): UsePlanFilesReturn {
 		setLoading(true);
 		setError(undefined);
 		try {
-			const [prdContent, progressContent, specContent] = await Promise.all([
-				readFileAsync(PRD_PATH),
-				readFileAsync(PROGRESS_PATH),
-				readFileAsync(SPEC_PATH),
-			]);
+			const [prdContent, progressContent, specContent, promptContent] =
+				await Promise.all([
+					readFileAsync(PRD_PATH),
+					readFileAsync(PROGRESS_PATH),
+					readFileAsync(SPEC_PATH),
+					readFileAsync(PROMPT_PATH),
+				]);
 			setData({
 				tasks: parsePrd(prdContent),
 				progress: progressContent ?? "",
 				hasSpec: specContent !== null,
 				hasPrd: prdContent !== null,
+				hasPrompt: promptContent !== null,
 			});
 		} catch (e) {
 			setError(e instanceof Error ? e.message : "Failed to read plan files");

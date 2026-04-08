@@ -5,6 +5,7 @@ import type { PlanFilesData } from "../hooks/use-plan-files";
 const MODE_LABELS: Record<ChatMode, string> = {
 	"create-spec": "Spec",
 	"create-prd": "PRD",
+	"create-prompt": "Prompt",
 };
 
 interface ContextSidebarProps {
@@ -35,6 +36,9 @@ export function ContextSidebar({
 			</text>
 			<text fg={planData.hasPrd ? "green" : "#666666"}>
 				{planData.hasPrd ? "✓ prd.json" : "○ No PRD"}
+			</text>
+			<text fg={planData.hasPrompt ? "green" : "#666666"}>
+				{planData.hasPrompt ? "✓ PROMPT.md" : "○ No prompt"}
 			</text>
 			{planData.tasks.length > 0 && (
 				<text fg="cyan">{`${doneCount}/${planData.tasks.length} tasks`}</text>

@@ -1,8 +1,12 @@
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CREATE_PRD_SYSTEM_PROMPT, CREATE_SPEC_SYSTEM_PROMPT } from "../skills";
+import {
+	CREATE_PRD_SYSTEM_PROMPT,
+	CREATE_PROMPT_SYSTEM_PROMPT,
+	CREATE_SPEC_SYSTEM_PROMPT,
+} from "../skills";
 
-export type ChatMode = "create-spec" | "create-prd";
+export type ChatMode = "create-spec" | "create-prd" | "create-prompt";
 
 export interface ChatMessage {
 	role: "user" | "assistant";
@@ -20,7 +24,11 @@ interface UseChatReturn {
 const SKILL_PROMPTS: Record<ChatMode, string> = {
 	"create-spec": CREATE_SPEC_SYSTEM_PROMPT,
 	"create-prd": CREATE_PRD_SYSTEM_PROMPT,
+	"create-prompt": CREATE_PROMPT_SYSTEM_PROMPT,
 };
+
+const POLL_INTERVAL_MS = 1000;
+const POLL_TIMEOUT_MS = 2 * 60 * 1000;
 
 export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -65,7 +73,16 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 					},
 				});
 
-				pollingRef.current = setInterval(async () => {
+				const pollStartedAt = Date.now();
+
+				const pollOnce = async (): Promise<boolean> => {
+					if (Date.now() - pollStartedAt > POLL_TIMEOUT_MS) {
+						stopPolling();
+						setError("Request timed out");
+						setLoading(false);
+						return true;
+					}
+
 					try {
 						const { job: updated } = await daemon.getJob(job.id);
 
@@ -82,22 +99,32 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 								},
 							]);
 							setLoading(false);
-						} else if (
-							updated.state === "failed" ||
-							updated.state === "cancelled"
-						) {
+							return true;
+						}
+						if (updated.state === "failed" || updated.state === "cancelled") {
 							stopPolling();
 							setError(updated.error ?? "Job failed");
 							setLoading(false);
+							return true;
 						}
+						return false;
 					} catch (pollError) {
 						stopPolling();
 						setError(
 							pollError instanceof Error ? pollError.message : "Polling failed",
 						);
 						setLoading(false);
+						return true;
 					}
-				}, 1000);
+				};
+
+				const done = await pollOnce();
+				if (!done) {
+					pollingRef.current = setInterval(
+						() => void pollOnce(),
+						POLL_INTERVAL_MS,
+					);
+				}
 			} catch (e) {
 				setError(e instanceof Error ? e.message : "Failed to submit message");
 				setLoading(false);

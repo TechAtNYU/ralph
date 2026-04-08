@@ -1,47 +1,13 @@
 import { TextAttributes } from "@opentui/core";
-import { useKeyboard } from "@opentui/react";
-import { useState } from "react";
-import { useFileSearch } from "../hooks/use-file-search";
+
+export const FILE_PICKER_VISIBLE_COUNT = 10;
 
 interface FilePickerProps {
-	query: string;
-	onSelect: (path: string) => void;
-	onDismiss: () => void;
-	focused: boolean;
+	results: string[];
+	selectedIndex: number;
 }
 
-export function FilePicker({
-	query,
-	onSelect,
-	onDismiss,
-	focused,
-}: FilePickerProps) {
-	const { results } = useFileSearch(query);
-	const [selectedIndex, setSelectedIndex] = useState(0);
-
-	useKeyboard((key) => {
-		if (!focused) return;
-		if (key.name === "escape") {
-			onDismiss();
-			return;
-		}
-		if (key.name === "down" || (key.name === "j" && key.ctrl)) {
-			setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
-			return;
-		}
-		if (key.name === "up" || (key.name === "k" && key.ctrl)) {
-			setSelectedIndex((i) => Math.max(i - 1, 0));
-			return;
-		}
-		if (key.name === "return") {
-			const selected = results[selectedIndex];
-			if (selected) {
-				onSelect(selected);
-			}
-			return;
-		}
-	});
-
+export function FilePicker({ results, selectedIndex }: FilePickerProps) {
 	if (results.length === 0) {
 		return (
 			<box
@@ -62,7 +28,7 @@ export function FilePicker({
 		);
 	}
 
-	const visibleResults = results.slice(0, 10);
+	const visibleResults = results.slice(0, FILE_PICKER_VISIBLE_COUNT);
 	const clampedIndex = Math.min(selectedIndex, visibleResults.length - 1);
 
 	return (

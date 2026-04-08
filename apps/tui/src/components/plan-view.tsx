@@ -8,7 +8,7 @@ import { ContextSidebar } from "./context-sidebar";
 import { PlanChat } from "./plan-chat";
 import { TaskOverlay } from "./task-overlay";
 
-const MODES: ChatMode[] = ["create-spec", "create-prd"];
+const MODES: ChatMode[] = ["create-spec", "create-prd", "create-prompt"];
 const SIDEBAR_MIN_WIDTH = 120;
 
 interface PlanViewProps {
@@ -54,7 +54,7 @@ export function PlanView({ focused, planData }: PlanViewProps) {
 					focused={focused && !showTasks}
 					messages={chat.messages}
 					loading={chat.loading}
-					error={chat.error}
+					error={chat.error ?? planInstance.error}
 					planData={planData}
 					onSend={chat.send}
 					onToggleMode={toggleMode}
