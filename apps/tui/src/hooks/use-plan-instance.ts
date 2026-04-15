@@ -27,9 +27,6 @@ export function usePlanInstance(): UsePlanInstanceReturn {
 				const existing = instances.find((i) => i.directory === cwd);
 				if (existing) {
 					setInstanceId(existing.id);
-					if (existing.status === "stopped") {
-						await daemon.startInstance(existing.id);
-					}
 					return existing.id;
 				}
 
@@ -37,7 +34,6 @@ export function usePlanInstance(): UsePlanInstanceReturn {
 					name: "plan",
 					directory: cwd,
 				});
-				await daemon.startInstance(instance.id);
 				setInstanceId(instance.id);
 				return instance.id;
 			} catch (e) {
