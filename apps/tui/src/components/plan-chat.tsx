@@ -16,8 +16,8 @@ interface PlanChatProps {
 	loading: boolean;
 	error: string | undefined;
 	planData: PlanFilesData;
+	daemonOnline: boolean;
 	onSend: (prompt: string, mode: ChatMode) => Promise<void>;
-	onToggleMode: () => void;
 	onToggleTasks: () => void;
 	onClear: () => void;
 	onSetMode: (mode: ChatMode) => void;
@@ -52,8 +52,8 @@ export function PlanChat({
 	loading,
 	error,
 	planData,
+	daemonOnline,
 	onSend,
-	onToggleMode,
 	onToggleTasks,
 	onClear,
 	onSetMode,
@@ -87,9 +87,6 @@ export function PlanChat({
 
 	useKeyboard((key) => {
 		if (!focused) return;
-		if (key.name === "m" && key.ctrl) {
-			onToggleMode();
-		}
 		if (key.name === "t" && key.ctrl) {
 			onToggleTasks();
 		}
@@ -243,6 +240,13 @@ export function PlanChat({
 			)}
 
 			<box flexDirection="column" marginTop={1}>
+				{!daemonOnline && (
+					<box paddingLeft={1} marginBottom={0}>
+						<text fg="red" attributes={TextAttributes.DIM}>
+							{"Daemon offline — start with bun run dev"}
+						</text>
+					</box>
+				)}
 				{fileRefs.length > 0 && (
 					<box flexDirection="row" paddingLeft={1} marginBottom={0}>
 						{fileRefs.map((ref) => (

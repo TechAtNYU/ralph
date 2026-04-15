@@ -19,7 +19,6 @@ const GENERAL_BINDINGS: KeyBinding[] = [
 ];
 
 const PLAN_BINDINGS: KeyBinding[] = [
-	{ keys: "Ctrl+M", desc: "Switch mode (Spec / PRD / Prompt)" },
 	{ keys: "Ctrl+T", desc: "Toggle task list" },
 	{ keys: "@", desc: "Insert file reference" },
 	{ keys: "/", desc: "Open command palette" },

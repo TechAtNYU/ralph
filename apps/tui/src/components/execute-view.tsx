@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import type {
@@ -7,6 +9,7 @@ import type {
 } from "@techatnyu/ralphd";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useState } from "react";
+import type { PlanFilesData } from "../hooks/use-plan-files";
 
 interface DashboardData {
 	health: HealthResult;
@@ -16,6 +19,7 @@ interface DashboardData {
 
 interface ExecuteViewProps {
 	focused: boolean;
+	planData: PlanFilesData;
 }
 
 function clampIndex(index: number, length: number): number {
@@ -52,11 +56,13 @@ function jobStateColor(state: string): string {
 	return "#888888";
 }
 
-export function ExecuteView({ focused }: ExecuteViewProps) {
+export function ExecuteView({ focused, planData }: ExecuteViewProps) {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string>();
 	const [data, setData] = useState<DashboardData>();
 	const [selectedIndex, setSelectedIndex] = useState(0);
+	const [starting, setStarting] = useState(false);
+	const [startMessage, setStartMessage] = useState<string>();
 
 	const refresh = useCallback(
 		async (nextIndex = selectedIndex) => {
@@ -95,11 +101,61 @@ export function ExecuteView({ focused }: ExecuteViewProps) {
 		void refresh();
 	}, [refresh]);
 
+	const handleStart = useCallback(async () => {
+		if (starting) return;
+		setStarting(true);
+		setStartMessage(undefined);
+		setError(undefined);
+		try {
+			const cwd = process.cwd();
+			const promptPath = join(cwd, ".ralph", "PROMPT.md");
+			const promptContent = (await readFile(promptPath, "utf-8")).trim();
+			if (!promptContent) {
+				throw new Error("PROMPT.md is empty");
+			}
+
+			const { instances } = await daemon.listInstances();
+			let instance = instances.find((i) => i.directory === cwd);
+			if (!instance) {
+				const created = await daemon.createInstance({
+					name: "execute",
+					directory: cwd,
+				});
+				instance = created.instance;
+			}
+
+			await daemon.submitJob({
+				instanceId: instance.id,
+				session: { type: "new" },
+				task: {
+					type: "prompt",
+					prompt: promptContent,
+				},
+			});
+
+			setStartMessage("Job submitted");
+			await refresh();
+		} catch (startError) {
+			setError(
+				startError instanceof Error
+					? startError.message
+					: "Failed to start execution",
+			);
+		} finally {
+			setStarting(false);
+		}
+	}, [refresh, starting]);
+
 	useKeyboard((key) => {
 		if (!focused) return;
 
 		if (key.name === "r") {
 			void refresh();
+			return;
+		}
+
+		if (key.name === "s" && planData.hasPrompt && !starting) {
+			void handleStart();
 			return;
 		}
 
@@ -119,6 +175,7 @@ export function ExecuteView({ focused }: ExecuteViewProps) {
 	});
 
 	const selected = data?.instances[selectedIndex];
+	const planReady = planData.hasPrompt;
 
 	return (
 		<box flexDirection="column" flexGrow={1}>
@@ -135,6 +192,26 @@ export function ExecuteView({ focused }: ExecuteViewProps) {
 						? `${data.health.running} running, ${data.health.queued} queued`
 						: (error ?? "No data available")}
 				</text>
+			</box>
+
+			<box flexDirection="row" height={1} marginBottom={1}>
+				{starting ? (
+					<text fg="cyan">Starting execution...</text>
+				) : planReady ? (
+					<>
+						<text fg="green">Plan ready</text>
+						<text attributes={TextAttributes.DIM}>
+							{"  Press [s] to start execution"}
+						</text>
+					</>
+				) : (
+					<text attributes={TextAttributes.DIM}>
+						Complete spec, prd, and prompt in Plan view to enable execution
+					</text>
+				)}
+				<box flexGrow={1} />
+				{startMessage && !error && <text fg="green">{startMessage}</text>}
+				{error && <text fg="red">{error}</text>}
 			</box>
 
 			<box flexDirection="row" flexGrow={1} gap={3}>

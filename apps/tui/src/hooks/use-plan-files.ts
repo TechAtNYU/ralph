@@ -1,4 +1,5 @@
 import { readFile, watch } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -75,6 +76,7 @@ export function usePlanFiles(): UsePlanFilesReturn {
 		setLoading(true);
 		setError(undefined);
 		try {
+			await mkdir(RALPH_DIR, { recursive: true });
 			const [prdContent, progressContent, specContent, promptContent] =
 				await Promise.all([
 					readFileAsync(PRD_PATH),

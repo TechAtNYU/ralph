@@ -8,20 +8,19 @@ import { ContextSidebar } from "./context-sidebar";
 import { PlanChat } from "./plan-chat";
 import { TaskOverlay } from "./task-overlay";
 
-const MODES: ChatMode[] = ["create-spec", "create-prd", "create-prompt"];
 const SIDEBAR_MIN_WIDTH = 120;
 
 interface PlanViewProps {
 	focused: boolean;
 	planData: PlanFilesData;
+	daemonOnline: boolean;
 }
 
-export function PlanView({ focused, planData }: PlanViewProps) {
+export function PlanView({ focused, planData, daemonOnline }: PlanViewProps) {
 	const [showTasks, setShowTasks] = useState(false);
-	const [modeIndex, setModeIndex] = useState(0);
+	const [mode, setMode] = useState<ChatMode>("create-spec");
 	const planInstance = usePlanInstance();
 	const chat = useChat(planInstance.ensure);
-	const mode: ChatMode = MODES[modeIndex] ?? "create-spec";
 	const { width } = useTerminalDimensions();
 	const showSidebar = width >= SIDEBAR_MIN_WIDTH;
 
@@ -32,19 +31,8 @@ export function PlanView({ focused, planData }: PlanViewProps) {
 		}
 	});
 
-	const toggleMode = () => {
-		setModeIndex((i) => (i + 1) % MODES.length);
-	};
-
 	const toggleTasks = () => {
 		setShowTasks((s) => !s);
-	};
-
-	const setMode = (newMode: ChatMode) => {
-		const index = MODES.indexOf(newMode);
-		if (index !== -1) {
-			setModeIndex(index);
-		}
 	};
 
 	return (
@@ -56,8 +44,8 @@ export function PlanView({ focused, planData }: PlanViewProps) {
 					loading={chat.loading}
 					error={chat.error ?? planInstance.error}
 					planData={planData}
+					daemonOnline={daemonOnline}
 					onSend={chat.send}
-					onToggleMode={toggleMode}
 					onToggleTasks={toggleTasks}
 					onClear={chat.clear}
 					onSetMode={setMode}
@@ -67,7 +55,6 @@ export function PlanView({ focused, planData }: PlanViewProps) {
 				{showSidebar && (
 					<ContextSidebar
 						planData={planData}
-						mode={mode}
 						messageCount={chat.messages.length}
 					/>
 				)}
