@@ -3,6 +3,7 @@ import { useKeyboard } from "@opentui/react";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useState } from "react";
 import { usePlanFiles } from "../hooks/use-plan-files";
+import { Chat } from "./chat";
 import { ExecuteView } from "./execute-view";
 import { HelpOverlay } from "./help-overlay";
 import { PlanView } from "./plan-view";
@@ -15,6 +16,11 @@ interface AppProps {
 
 type FocusZone = "tabs" | "content";
 
+interface ActiveChat {
+	instanceId: string;
+	instanceName: string;
+}
+
 const TAB_OPTIONS = [
 	{ name: "Plan", description: "" },
 	{ name: "Execute", description: "" },
@@ -26,6 +32,7 @@ export function App({ onQuit }: AppProps) {
 	const [focusZone, setFocusZone] = useState<FocusZone>("content");
 	const [daemonOnline, setDaemonOnline] = useState(true);
 	const [showHelp, setShowHelp] = useState(false);
+	const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
 	const planFiles = usePlanFiles();
 
 	const checkDaemon = useCallback(async () => {
@@ -44,6 +51,7 @@ export function App({ onQuit }: AppProps) {
 	}, [checkDaemon]);
 
 	useKeyboard((key) => {
+		if (activeChat) return;
 		if (showHelp) {
 			if (
 				key.name === "escape" ||
@@ -85,6 +93,17 @@ export function App({ onQuit }: AppProps) {
 	});
 
 	const contentFocused = focusZone === "content";
+
+	if (activeChat) {
+		return (
+			<Chat
+				instanceId={activeChat.instanceId}
+				instanceName={activeChat.instanceName}
+				onBack={() => setActiveChat(null)}
+				onQuit={onQuit}
+			/>
+		);
+	}
 
 	return (
 		<box flexDirection="column" flexGrow={1}>
@@ -128,6 +147,9 @@ export function App({ onQuit }: AppProps) {
 					<ExecuteView
 						focused={contentFocused && activeTab === 1}
 						planData={planFiles.data}
+						onOpenChat={(instanceId, instanceName) =>
+							setActiveChat({ instanceId, instanceName })
+						}
 					/>
 				</box>
 				<box

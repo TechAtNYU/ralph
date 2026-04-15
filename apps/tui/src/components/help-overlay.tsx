@@ -30,8 +30,10 @@ const TASK_BINDINGS: KeyBinding[] = [
 ];
 
 const EXECUTE_BINDINGS: KeyBinding[] = [
-	{ keys: "j/k", desc: "Select job" },
-	{ keys: "r", desc: "Refresh jobs" },
+	{ keys: "j/k", desc: "Select instance" },
+	{ keys: "Enter", desc: "Chat with instance" },
+	{ keys: "s", desc: "Start execution from plan" },
+	{ keys: "r", desc: "Refresh" },
 ];
 
 function KeyRow({ keys, desc }: KeyBinding) {
