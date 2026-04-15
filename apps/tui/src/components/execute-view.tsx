@@ -20,6 +20,7 @@ interface DashboardData {
 interface ExecuteViewProps {
 	focused: boolean;
 	planData: PlanFilesData;
+	onOpenChat: (instanceId: string, instanceName: string) => void;
 }
 
 function clampIndex(index: number, length: number): number {
@@ -56,7 +57,11 @@ function jobStateColor(state: string): string {
 	return "#888888";
 }
 
-export function ExecuteView({ focused, planData }: ExecuteViewProps) {
+export function ExecuteView({
+	focused,
+	planData,
+	onOpenChat,
+}: ExecuteViewProps) {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string>();
 	const [data, setData] = useState<DashboardData>();
@@ -160,6 +165,14 @@ export function ExecuteView({ focused, planData }: ExecuteViewProps) {
 		}
 
 		if (!data) return;
+
+		if (key.name === "return") {
+			const instance = data.instances[selectedIndex];
+			if (instance) {
+				onOpenChat(instance.id, instance.name);
+			}
+			return;
+		}
 
 		if (key.name === "down" || key.name === "j") {
 			const next = clampIndex(selectedIndex + 1, data.instances.length);

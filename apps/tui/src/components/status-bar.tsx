@@ -8,7 +8,7 @@ interface StatusBarProps {
 
 const HELP_BY_TAB: Record<number, string> = {
 	0: "Tab: tabs  Ctrl+T: tasks  /: commands  ?: help",
-	1: "Tab: tabs  j/k: select  r: refresh  ?: help",
+	1: "Tab: tabs  j/k: select  enter: chat  r: refresh  ?: help",
 	2: "Tab: tabs  ?: help",
 };
 
