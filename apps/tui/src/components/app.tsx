@@ -107,11 +107,37 @@ export function App({ onQuit }: AppProps) {
 			/>
 
 			<box flexDirection="column" flexGrow={1} marginTop={1}>
-				{activeTab === 0 && (
-					<PlanView focused={contentFocused} planData={planFiles.data} />
-				)}
-				{activeTab === 1 && <ExecuteView focused={contentFocused} />}
-				{activeTab === 2 && <ReviewView />}
+				<box
+					flexGrow={activeTab === 0 ? 1 : 0}
+					overflow={activeTab === 0 ? "visible" : "hidden"}
+					height={activeTab === 0 ? undefined : 0}
+					flexDirection="column"
+				>
+					<PlanView
+						focused={contentFocused && activeTab === 0}
+						planData={planFiles.data}
+						daemonOnline={daemonOnline}
+					/>
+				</box>
+				<box
+					flexGrow={activeTab === 1 ? 1 : 0}
+					overflow={activeTab === 1 ? "visible" : "hidden"}
+					height={activeTab === 1 ? undefined : 0}
+					flexDirection="column"
+				>
+					<ExecuteView
+						focused={contentFocused && activeTab === 1}
+						planData={planFiles.data}
+					/>
+				</box>
+				<box
+					flexGrow={activeTab === 2 ? 1 : 0}
+					overflow={activeTab === 2 ? "visible" : "hidden"}
+					height={activeTab === 2 ? undefined : 0}
+					flexDirection="column"
+				>
+					<ReviewView />
+				</box>
 			</box>
 
 			{showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}

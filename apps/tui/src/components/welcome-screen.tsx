@@ -94,12 +94,6 @@ export function WelcomeScreen({ planData }: WelcomeScreenProps) {
 			<box flexDirection="column" marginTop={1} paddingLeft={2}>
 				<text attributes={TextAttributes.DIM}>Shortcuts:</text>
 				<box flexDirection="row">
-					<text fg="cyan">Ctrl+M</text>
-					<text attributes={TextAttributes.DIM}>
-						{"   Switch mode (Spec / PRD / Prompt)"}
-					</text>
-				</box>
-				<box flexDirection="row">
 					<text fg="cyan">Ctrl+T</text>
 					<text attributes={TextAttributes.DIM}>{"   Toggle task list"}</text>
 				</box>
