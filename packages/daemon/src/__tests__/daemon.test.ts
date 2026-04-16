@@ -307,4 +307,99 @@ describe("Daemon", () => {
 		);
 		await nextDaemon.shutdown();
 	});
+
+	test("returns session diffs from the opencode runtime", async () => {
+		const created = await daemon.handleRequest(
+			req({
+				id: "instance-create",
+				method: "instance.create",
+				params: {
+					name: "One",
+					directory: "/tmp/project-one",
+				},
+			}),
+		);
+		const instance = expectSuccess(created, "instance.create");
+		const patch =
+			"Index: src/a.ts\n===================================================================\n--- src/a.ts\n+++ src/a.ts\n@@ -1 +1 @@\n-old\n+new\n";
+		registry.diffsBySession.set("session-xyz", [
+			{
+				file: "src/a.ts",
+				patch,
+				additions: 3,
+				deletions: 2,
+				status: "modified",
+			},
+		]);
+
+		const response = await daemon.handleRequest(
+			req({
+				id: "session-diffs",
+				method: "session.diffs",
+				params: {
+					instanceId: instance.instance.id,
+					sessionId: "session-xyz",
+				},
+			}),
+		);
+
+		const result = expectSuccess(response, "session.diffs");
+		expect(result.diffs).toHaveLength(1);
+		expect(result.diffs[0]).toEqual({
+			file: "src/a.ts",
+			patch,
+			additions: 3,
+			deletions: 2,
+			status: "modified",
+		});
+		expect(registry.diffCalls).toEqual([
+			{
+				instanceId: instance.instance.id,
+				sessionId: "session-xyz",
+				directory: "/tmp/project-one",
+			},
+		]);
+	});
+
+	test("returns empty diffs when session has no changes", async () => {
+		const created = await daemon.handleRequest(
+			req({
+				id: "instance-create",
+				method: "instance.create",
+				params: {
+					name: "One",
+					directory: "/tmp/project-one",
+				},
+			}),
+		);
+		const instance = expectSuccess(created, "instance.create");
+
+		const response = await daemon.handleRequest(
+			req({
+				id: "session-diffs",
+				method: "session.diffs",
+				params: {
+					instanceId: instance.instance.id,
+					sessionId: "session-empty",
+				},
+			}),
+		);
+
+		const result = expectSuccess(response, "session.diffs");
+		expect(result.diffs).toEqual([]);
+	});
+
+	test("rejects session.diffs for nonexistent instance", async () => {
+		const response = await daemon.handleRequest(
+			req({
+				id: "session-diffs",
+				method: "session.diffs",
+				params: {
+					instanceId: "nonexistent",
+					sessionId: "session-xyz",
+				},
+			}),
+		);
+		expect(expectFailure(response).error.code).toBe("not_found");
+	});
 });

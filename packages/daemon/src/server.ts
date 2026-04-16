@@ -32,6 +32,7 @@ import {
 	type ResponseError,
 	type ResponseMessage,
 	type ResultByMethod,
+	type SessionDiffsResult,
 	type ShutdownResult,
 	type SubmitResult,
 } from "./protocol";
@@ -146,6 +147,8 @@ export class Daemon {
 					return this.success(raw, this.handleJobGet(raw));
 				case "job.cancel":
 					return this.success(raw, await this.handleJobCancel(raw));
+				case "session.diffs":
+					return this.success(raw, await this.handleSessionDiffs(raw));
 			}
 		} catch (error) {
 			return this.failure(raw.id, raw.method, this.toResponseError(error));
@@ -378,6 +381,21 @@ export class Daemon {
 		}
 
 		return { job };
+	}
+
+	private async handleSessionDiffs(
+		request: RequestByMethod<"session.diffs">,
+	): Promise<SessionDiffsResult> {
+		const instance = this.store.assertInstance(
+			this.state,
+			request.params.instanceId,
+		);
+		const runtime = await this.registry.ensureStarted(instance.id);
+		const diffs = await runtime.client.session.diff({
+			sessionID: request.params.sessionId,
+			directory: instance.directory,
+		});
+		return { diffs };
 	}
 
 	private async recoverPersistedState(
