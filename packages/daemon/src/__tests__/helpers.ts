@@ -64,7 +64,7 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 	readonly diffCalls: Array<{
 		instanceId: string;
 		sessionId: string;
-		directory: string;
+		directory: string | undefined;
 	}> = [];
 	readonly diffsBySession = new Map<string, FileDiff[]>();
 	globalMaxConcurrent = 0;
