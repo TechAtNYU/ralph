@@ -7,6 +7,8 @@ import {
 	type TextPartInput,
 } from "@opencode-ai/sdk/v2";
 
+import type { FileDiff } from "./protocol";
+
 export interface OpencodeSessionClient {
 	create(parameters: { directory?: string; title?: string }): Promise<Session>;
 	prompt(parameters: {
@@ -25,6 +27,10 @@ export interface OpencodeSessionClient {
 		sessionID: string;
 		directory?: string;
 	}): Promise<unknown>;
+	diff(parameters: {
+		sessionID: string;
+		directory?: string;
+	}): Promise<FileDiff[]>;
 }
 
 export interface ProviderModel {
@@ -168,6 +174,13 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 							client.session.abort(parameters, {
 								throwOnError: true,
 							}),
+						diff: async (parameters) => {
+							const res = await client.session.diff(parameters, {
+								throwOnError: true,
+								responseStyle: "data",
+							});
+							return res as unknown as FileDiff[];
+						},
 					},
 					provider: {
 						list: async (parameters) => {

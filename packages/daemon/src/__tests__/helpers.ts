@@ -5,6 +5,7 @@ import type {
 	OpencodeRuntimeEvent,
 	OpencodeRuntimeManager,
 } from "../opencode";
+import type { FileDiff } from "../protocol";
 
 function fakeSession(overrides: Partial<Session> & { id: string }): Session {
 	return {
@@ -68,6 +69,12 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 	readonly abortCalls: Array<{ instanceId: string; sessionId: string }> = [];
 	readonly directoriesStarted: string[] = [];
 	readonly disposeCalls: Array<{ directory?: string }> = [];
+	readonly diffCalls: Array<{
+		instanceId: string;
+		sessionId: string;
+		directory: string;
+	}> = [];
+	readonly diffsBySession = new Map<string, FileDiff[]>();
 	globalMaxConcurrent = 0;
 	/** Configurable per-test: an array of text deltas the fake will emit
 	 * via the wired onEvent handler before returning the final response
@@ -190,6 +197,14 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 					abort: async ({ sessionID }) => {
 						this.abortCalls.push({ instanceId, sessionId: sessionID });
 						return undefined;
+					},
+					diff: async ({ sessionID, directory }) => {
+						this.diffCalls.push({
+							instanceId,
+							sessionId: sessionID,
+							directory,
+						});
+						return this.diffsBySession.get(sessionID) ?? [];
 					},
 				},
 				provider: {

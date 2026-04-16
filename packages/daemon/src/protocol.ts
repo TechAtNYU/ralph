@@ -59,6 +59,16 @@ const JobSession = z.discriminatedUnion("type", [
 ]);
 export type JobSession = z.infer<typeof JobSession>;
 
+/** A file-level diff produced by the OpenCode SDK for a session. */
+const FileDiff = z.strictObject({
+	file: z.string().min(1),
+	patch: z.string(),
+	additions: z.int().nonnegative(),
+	deletions: z.int().nonnegative(),
+	status: z.enum(["added", "deleted", "modified"]).optional(),
+});
+export type FileDiff = z.infer<typeof FileDiff>;
+
 /** A registered Claude Code instance the daemon manages. */
 const ManagedInstance = z.strictObject({
 	id: z.string().min(1),
@@ -187,6 +197,14 @@ const JobStreamParams = z.strictObject({
 	jobId: z.string().min(1),
 });
 export type JobStreamParams = z.infer<typeof JobStreamParams>;
+
+// Session operations
+
+const SessionDiffsParams = z.strictObject({
+	instanceId: z.string().min(1),
+	sessionId: z.string().min(1),
+});
+export type SessionDiffsParams = z.infer<typeof SessionDiffsParams>;
 
 // ---------------------------------------------------------------------------
 // Result schemas — per-method response payloads (success path)
@@ -330,6 +348,13 @@ const ProviderListResult = z.strictObject({
 });
 export type ProviderListResult = z.infer<typeof ProviderListResult>;
 
+// Session results
+
+const SessionDiffsResult = z.strictObject({
+	diffs: z.array(FileDiff),
+});
+export type SessionDiffsResult = z.infer<typeof SessionDiffsResult>;
+
 // ---------------------------------------------------------------------------
 // Error schema
 // ---------------------------------------------------------------------------
@@ -378,6 +403,7 @@ const RequestMethod = z.enum([
 	"job.get",
 	"job.cancel",
 	"job.stream",
+	"session.diffs",
 ]);
 export type RequestMethod = z.infer<typeof RequestMethod>;
 
@@ -487,6 +513,14 @@ const JobStreamRequest = z.strictObject({
 	params: JobStreamParams,
 });
 
+// Session requests
+
+const SessionDiffsRequest = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("session.diffs"),
+	params: SessionDiffsParams,
+});
+
 /** Union of every valid request the daemon accepts. */
 export const RequestMessage = z.discriminatedUnion("method", [
 	DaemonHealthRequest,
@@ -505,6 +539,7 @@ export const RequestMessage = z.discriminatedUnion("method", [
 	JobGetRequest,
 	JobCancelRequest,
 	JobStreamRequest,
+	SessionDiffsRequest,
 ]);
 export type RequestMessage = z.infer<typeof RequestMessage>;
 
@@ -634,6 +669,15 @@ const JobStreamSuccess = z.strictObject({
 	result: StreamAckResult,
 });
 
+// Session successes
+
+const SessionDiffsSuccess = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("session.diffs"),
+	ok: z.literal(true),
+	result: SessionDiffsResult,
+});
+
 // Error response
 
 const ErrorResponse = z.strictObject({
@@ -662,6 +706,7 @@ export const ResponseMessage = z.union([
 	JobGetSuccess,
 	JobCancelSuccess,
 	JobStreamSuccess,
+	SessionDiffsSuccess,
 	ErrorResponse,
 ]);
 export type ResponseMessage = z.infer<typeof ResponseMessage>;

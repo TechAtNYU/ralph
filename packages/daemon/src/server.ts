@@ -31,6 +31,7 @@ import {
 	type ResponseError,
 	type ResponseMessage,
 	type ResultByMethod,
+	type SessionDiffsResult,
 	type SessionGetResult,
 	type SessionListResult,
 	type ShutdownResult,
@@ -237,6 +238,8 @@ export class Daemon {
 					return this.success(raw, await this.handleJobCancel(raw));
 				case "job.stream":
 					return this.success(raw, this.handleJobStream(raw));
+				case "session.diffs":
+					return this.success(raw, await this.handleSessionDiffs(raw));
 			}
 		} catch (error) {
 			return this.failure(raw.id, raw.method, this.toResponseError(error));
@@ -549,6 +552,21 @@ export class Daemon {
 			this.emitJobEvent(jobId, { type: "delta", jobId, field, delta });
 			return;
 		}
+	}
+
+	private async handleSessionDiffs(
+		request: RequestByMethod<"session.diffs">,
+	): Promise<SessionDiffsResult> {
+		const instance = this.store.assertInstance(request.params.instanceId);
+		const runtime = await this.registry.ensureStarted(
+			instance.id,
+			instance.directory,
+		);
+		const diffs = await runtime.client.session.diff({
+			sessionID: request.params.sessionId,
+			directory: instance.directory,
+		});
+		return { diffs };
 	}
 
 	private enqueueById(instanceId: string, jobId: string): void {

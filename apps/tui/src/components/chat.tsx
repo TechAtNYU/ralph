@@ -6,6 +6,7 @@ import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPromptTask } from "../lib/prompt-task";
 import { ralphStore } from "../lib/store";
+import { DiffViewer } from "./diff-viewer";
 
 type Role = "user" | "assistant" | "system";
 
@@ -62,6 +63,7 @@ export function Chat({
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
 	const [hydrated, setHydrated] = useState(false);
+	const [tab, setTab] = useState<"chat" | "diffs">("chat");
 	const sendLockRef = useRef(false);
 	const chatScrollRef = useRef<ScrollBoxRenderable | null>(null);
 
@@ -235,6 +237,19 @@ export function Chat({
 	}, [instanceId, instanceName, sessionId, consumeStream]);
 
 	useKeyboard((event) => {
+		if (event.ctrl && event.name === "r") {
+			if (tab === "chat" && sessionId) {
+				setTab("diffs");
+			} else if (tab === "diffs") {
+				setTab("chat");
+			}
+			return;
+		}
+
+		if (tab !== "chat") {
+			return;
+		}
+
 		if (event.ctrl && event.name === "c") {
 			onQuit();
 		}
@@ -316,6 +331,17 @@ export function Chat({
 		[instanceId, sessionId, isLoading, hydrated, consumeStream],
 	);
 
+	if (tab === "diffs" && sessionId) {
+		return (
+			<DiffViewer
+				instanceId={instanceId}
+				sessionId={sessionId}
+				onBack={() => setTab("chat")}
+				onQuit={onQuit}
+			/>
+		);
+	}
+
 	return (
 		<box flexDirection="column" flexGrow={1} width="100%">
 			<box flexShrink={0} height={1} width="100%">
@@ -323,7 +349,8 @@ export function Chat({
 					Ralph Chat · {instanceName}
 					{sessionId ? ` · session: ${sessionId.slice(0, 8)}` : ""}
 					{errorMessage ? ` · error: ${errorMessage}` : ""} · PgUp/PgDn or
-					Ctrl+U/Ctrl+D scroll · esc back · ctrl+c quit
+					Ctrl+U/Ctrl+D scroll{sessionId ? " · ctrl+r diffs" : ""} · esc back ·
+					ctrl+c quit
 				</text>
 			</box>
 
