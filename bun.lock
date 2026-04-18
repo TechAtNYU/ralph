@@ -46,6 +46,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@crustjs/core": "^0.0.13",
+        "@crustjs/create": "^0.0.4",
         "@crustjs/plugins": "^0.0.16",
         "@crustjs/store": "^0.0.4",
         "@opentui/core": "^0.1.77",
@@ -180,6 +181,8 @@
     "@changesets/write": ["@changesets/write@0.4.0", "", { "dependencies": { "@changesets/types": "^6.1.0", "fs-extra": "^7.0.1", "human-id": "^4.1.1", "prettier": "^2.7.1" } }, "sha512-CdTLvIOPiCNuH71pyDu3rA+Q0n65cmAbXnwWH84rKGiFumFzkmHNT8KHTMEchcxN+Kl8I54xGUhJ7l3E7X396Q=="],
 
     "@crustjs/core": ["@crustjs/core@0.0.13", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-kAjSL68kjEdO68uGQVWn6RQwaFFx17skogokyTF3UutF7WZepMhzQ7Zhw4Q5joKrVZJjCcSkRkDYzb6bye/Rgg=="],
+
+    "@crustjs/create": ["@crustjs/create@0.0.4", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-vGbJKCc0zQQdSjfYo4gMYplGvfh1UNRupcyGTR9Rg4U8ej0UpmVLkoSz7b4wcC7XBuLs3pmYaLYZhT/k24SWNQ=="],
 
     "@crustjs/plugins": ["@crustjs/plugins@0.0.16", "", { "dependencies": { "@crustjs/style": "0.0.5" }, "peerDependencies": { "@crustjs/core": "0.0.13", "typescript": "^5" } }, "sha512-Y3MuwpHxPEutEqBzpR8sLuG3z61BRPDiWDOQppw1M2xaEI/RTTfuYRVfPF58NGrcKSRFFDn8vfty+rUdkacnwg=="],
 
