@@ -8,7 +8,7 @@ import type {
 } from "@techatnyu/ralphd";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useState } from "react";
-import { ralphStore, setModelAndRecent } from "../store";
+import { ralphStore, setModelAndRecent } from "../lib/store";
 import { Chat } from "./chat";
 
 type View =

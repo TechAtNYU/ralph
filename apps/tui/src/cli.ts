@@ -9,7 +9,7 @@ import {
 	waitUntilReady,
 } from "@techatnyu/ralphd";
 import { runTui } from "./index";
-import { parseModelRef, ralphStore, setModelAndRecent } from "./store";
+import { parseModelRef, ralphStore, setModelAndRecent } from "./lib/store";
 
 async function requireDaemon(): Promise<void> {
 	const running = await daemon.isDaemonRunning();
