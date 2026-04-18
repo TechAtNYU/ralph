@@ -26,11 +26,35 @@ export interface OpencodeSessionClient {
 	}): Promise<unknown>;
 }
 
+export interface ProviderModel {
+	id: string;
+	name: string;
+	family?: string;
+	attachment?: boolean;
+	reasoning?: boolean;
+	tool_call?: boolean;
+}
+
+export interface Provider {
+	id: string;
+	name: string;
+	models: Record<string, ProviderModel>;
+}
+
+export interface ProviderListResult {
+	providers: Provider[];
+	connected: string[];
+}
+
 export interface OpencodeRuntimeClient {
 	session: OpencodeSessionClient;
 	instance: {
 		dispose(): Promise<unknown>;
 	};
+	provider: {
+		list(parameters?: { directory?: string }): Promise<ProviderListResult>;
+	};
+	ping(): Promise<boolean>;
 }
 
 export interface ManagedOpencodeRuntime {
@@ -47,12 +71,18 @@ export interface OpencodeRuntimeManager {
 	isRunning(instanceId: string): boolean;
 	stop(instanceId: string): Promise<void>;
 	stopAll(): Promise<void>;
+	queryProviders(
+		directory?: string,
+		refresh?: boolean,
+	): Promise<ProviderListResult>;
 }
 
 interface RuntimeEntry {
 	runtime?: ManagedOpencodeRuntime;
 	starting?: Promise<ManagedOpencodeRuntime>;
 }
+
+const SYSTEM_INSTANCE_ID = "__system__";
 
 export class OpencodeRegistry implements OpencodeRuntimeManager {
 	private readonly runtimes = new Map<string, RuntimeEntry>();
@@ -95,6 +125,41 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 							client.session.abort(parameters, {
 								throwOnError: true,
 							}),
+					},
+					provider: {
+						list: async (parameters) => {
+							const response = await client.provider.list(parameters, {
+								throwOnError: true,
+							});
+							return {
+								providers: response.data.all.map((p) => ({
+									id: p.id,
+									name: p.name,
+									models: Object.fromEntries(
+										Object.entries(p.models).map(([k, m]) => [
+											k,
+											{
+												id: m.id,
+												name: m.name,
+												family: m.family,
+												attachment: m.attachment,
+												reasoning: m.reasoning,
+												tool_call: m.tool_call,
+											},
+										]),
+									),
+								})),
+								connected: response.data.connected,
+							};
+						},
+					},
+					async ping() {
+						try {
+							await client.path.get({}, { throwOnError: true });
+							return true;
+						} catch {
+							return false;
+						}
 					},
 				},
 				server,
@@ -140,5 +205,54 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 		await Promise.allSettled(
 			[...this.runtimes.keys()].map((instanceId) => this.stop(instanceId)),
 		);
+	}
+
+	/**
+	 * Get or create a long-lived system runtime for provider queries and other
+	 * lightweight operations that don't belong to a user-created instance.
+	 */
+	private ensureSystemRuntime(): Promise<ManagedOpencodeRuntime> {
+		return this.ensureStarted(SYSTEM_INSTANCE_ID);
+	}
+
+	private async healthCheck(runtime: ManagedOpencodeRuntime): Promise<boolean> {
+		return runtime.client.ping();
+	}
+
+	async queryProviders(
+		directory?: string,
+		refresh?: boolean,
+	): Promise<ProviderListResult> {
+		// When refresh is requested, dispose the runtime's internal instance so
+		// OpenCode re-reads auth.json and rebuilds its provider cache.
+		if (refresh) {
+			const runtime = await this.ensureSystemRuntime();
+			try {
+				await runtime.client.instance.dispose();
+			} catch {
+				// dispose may fail if the instance was already gone — ignore
+			}
+			return runtime.client.provider.list({ directory });
+		}
+
+		// Prefer an existing user runtime if one is available
+		for (const [id, entry] of this.runtimes.entries()) {
+			if (id !== SYSTEM_INSTANCE_ID && entry.runtime) {
+				try {
+					return await entry.runtime.client.provider.list({ directory });
+				} catch {}
+			}
+		}
+
+		// Fall back to the long-lived system runtime
+		let runtime = await this.ensureSystemRuntime();
+
+		// Health check — restart if the system instance died
+		if (!(await this.healthCheck(runtime))) {
+			this.runtimes.delete(SYSTEM_INSTANCE_ID);
+			runtime = await this.ensureSystemRuntime();
+		}
+
+		return runtime.client.provider.list({ directory });
 	}
 }
