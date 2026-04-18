@@ -28,12 +28,7 @@ export function resolveSessionScaffoldPath(
 	const ralphHome =
 		options.ralphHome ?? resolveDaemonPaths(process.env).ralphHome;
 
-	return join(
-		ralphHome,
-		"sessions",
-		options.instanceId,
-		options.sessionId,
-	);
+	return join(ralphHome, "sessions", options.instanceId, options.sessionId);
 }
 
 export async function bootstrapSessionScaffold(
