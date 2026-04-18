@@ -258,7 +258,11 @@ function Dashboard({
 	if (modelPicker) {
 		return (
 			<box flexDirection="column" flexGrow={1} padding={1}>
-				<box flexDirection="row" justifyContent="space-between" marginBottom={1}>
+				<box
+					flexDirection="row"
+					justifyContent="space-between"
+					marginBottom={1}
+				>
 					<text attributes={TextAttributes.BOLD}>Select Model</text>
 					<text attributes={TextAttributes.DIM}>esc</text>
 				</box>
