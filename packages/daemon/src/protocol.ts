@@ -136,6 +136,16 @@ const InstanceRemoveParams = z.strictObject({
 });
 export type InstanceRemoveParams = z.infer<typeof InstanceRemoveParams>;
 
+// Provider operations
+
+const ProviderListParams = z.strictObject({
+	directory: z.string().min(1).optional(),
+	/** When true, dispose the cached OpenCode instance before querying so
+	 *  provider data (including newly-connected credentials) is re-read. */
+	refresh: z.boolean().optional(),
+});
+export type ProviderListParams = z.infer<typeof ProviderListParams>;
+
 // Job operations
 
 const JobSubmitParams = z.strictObject({
@@ -242,6 +252,29 @@ const SessionDiffsResult = z.strictObject({
 });
 export type SessionDiffsResult = z.infer<typeof SessionDiffsResult>;
 
+// Provider results
+
+const ProviderModel = z.strictObject({
+	id: z.string().min(1),
+	name: z.string().min(1),
+	family: z.string().optional(),
+	attachment: z.boolean().optional(),
+	reasoning: z.boolean().optional(),
+	tool_call: z.boolean().optional(),
+});
+
+const ProviderEntry = z.strictObject({
+	id: z.string().min(1),
+	name: z.string().min(1),
+	models: z.record(z.string(), ProviderModel),
+});
+
+const ProviderListResult = z.strictObject({
+	providers: z.array(ProviderEntry),
+	connected: z.array(z.string()),
+});
+export type ProviderListResult = z.infer<typeof ProviderListResult>;
+
 // ---------------------------------------------------------------------------
 // Error schema
 // ---------------------------------------------------------------------------
@@ -282,6 +315,7 @@ const RequestMethod = z.enum([
 	"instance.start",
 	"instance.stop",
 	"instance.remove",
+	"provider.list",
 	"job.submit",
 	"job.list",
 	"job.get",
@@ -342,6 +376,14 @@ const InstanceRemoveRequest = z.strictObject({
 	params: InstanceRemoveParams,
 });
 
+// Provider requests
+
+const ProviderListRequest = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("provider.list"),
+	params: ProviderListParams,
+});
+
 // Job requests
 
 const JobSubmitRequest = z.strictObject({
@@ -386,6 +428,7 @@ export const RequestMessage = z.discriminatedUnion("method", [
 	InstanceStartRequest,
 	InstanceStopRequest,
 	InstanceRemoveRequest,
+	ProviderListRequest,
 	JobSubmitRequest,
 	JobListRequest,
 	JobGetRequest,
@@ -458,6 +501,15 @@ const InstanceRemoveSuccess = z.strictObject({
 	result: InstanceResult,
 });
 
+// Provider successes
+
+const ProviderListSuccess = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("provider.list"),
+	ok: z.literal(true),
+	result: ProviderListResult,
+});
+
 // Job successes
 
 const JobSubmitSuccess = z.strictObject({
@@ -517,6 +569,7 @@ export const ResponseMessage = z.union([
 	InstanceStartSuccess,
 	InstanceStopSuccess,
 	InstanceRemoveSuccess,
+	ProviderListSuccess,
 	JobSubmitSuccess,
 	JobListSuccess,
 	JobGetSuccess,
