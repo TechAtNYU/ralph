@@ -48,6 +48,7 @@
         "@crustjs/core": "^0.0.13",
         "@crustjs/create": "^0.0.4",
         "@crustjs/plugins": "^0.0.16",
+        "@crustjs/store": "^0.0.4",
         "@opentui/core": "^0.1.77",
         "@opentui/react": "^0.1.77",
         "@techatnyu/ralphd": "workspace:*",
@@ -184,6 +185,8 @@
     "@crustjs/create": ["@crustjs/create@0.0.4", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-vGbJKCc0zQQdSjfYo4gMYplGvfh1UNRupcyGTR9Rg4U8ej0UpmVLkoSz7b4wcC7XBuLs3pmYaLYZhT/k24SWNQ=="],
 
     "@crustjs/plugins": ["@crustjs/plugins@0.0.16", "", { "dependencies": { "@crustjs/style": "0.0.5" }, "peerDependencies": { "@crustjs/core": "0.0.13", "typescript": "^5" } }, "sha512-Y3MuwpHxPEutEqBzpR8sLuG3z61BRPDiWDOQppw1M2xaEI/RTTfuYRVfPF58NGrcKSRFFDn8vfty+rUdkacnwg=="],
+
+    "@crustjs/store": ["@crustjs/store@0.0.4", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-pfYuykVBH08HKBpycPcBZrk4CSQMVhccENDANbJoGXX86YjZk5urjzaJGeGXR1S4DVCt6hGC15aiRf6SEbpyag=="],
 
     "@crustjs/style": ["@crustjs/style@0.0.5", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-KZhxi2iCMYEMihMDmOrHkC4gl5INtogR9AEfbOkjwot74cmNQ2vTUfiZsLmWzBQ23nhPQ0vBwZBNFN+IpH+F0w=="],
 
