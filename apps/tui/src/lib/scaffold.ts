@@ -17,6 +17,10 @@ function assertValidSegment(value: string, label: string): void {
 	if (value.includes("/") || value.includes("\\")) {
 		throw new Error(`${label} must not contain path separators`);
 	}
+
+	if (value === "." || value === "..") {
+		throw new Error(`${label} must not be a dot path segment`);
+	}
 }
 
 export function resolveSessionScaffoldPath(
@@ -39,7 +43,7 @@ export async function bootstrapSessionScaffold(
 	await mkdir(sessionPath, { recursive: true });
 
 	await scaffold({
-		template: new URL("../templates/ralph-workspace", import.meta.url),
+		template: new URL("../../templates/ralph-workspace", import.meta.url),
 		dest: sessionPath,
 		context: {
 			instanceId: options.instanceId,
