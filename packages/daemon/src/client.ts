@@ -206,6 +206,12 @@ export class DaemonClient {
 			ResultByMethod<"job.cancel">
 		>;
 	}
+
+	sessionDiffs(params: ParamsByMethod<"session.diffs">) {
+		return send(this.socketPath, "session.diffs", params) as Promise<
+			ResultByMethod<"session.diffs">
+		>;
+	}
 }
 
 export const daemon = new DaemonClient();

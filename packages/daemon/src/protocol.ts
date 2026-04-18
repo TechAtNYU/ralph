@@ -59,6 +59,16 @@ const JobSession = z.discriminatedUnion("type", [
 ]);
 export type JobSession = z.infer<typeof JobSession>;
 
+/** A file-level diff produced by the OpenCode SDK for a session. */
+const FileDiff = z.strictObject({
+	file: z.string().min(1),
+	patch: z.string(),
+	additions: z.int().nonnegative(),
+	deletions: z.int().nonnegative(),
+	status: z.enum(["added", "deleted", "modified"]).optional(),
+});
+export type FileDiff = z.infer<typeof FileDiff>;
+
 /** A registered Claude Code instance the daemon manages. */
 const ManagedInstance = z.strictObject({
 	id: z.string().min(1),
@@ -161,6 +171,14 @@ const JobCancelParams = z.strictObject({
 });
 export type JobCancelParams = z.infer<typeof JobCancelParams>;
 
+// Session operations
+
+const SessionDiffsParams = z.strictObject({
+	instanceId: z.string().min(1),
+	sessionId: z.string().min(1),
+});
+export type SessionDiffsParams = z.infer<typeof SessionDiffsParams>;
+
 // ---------------------------------------------------------------------------
 // Result schemas — per-method response payloads (success path)
 // ---------------------------------------------------------------------------
@@ -226,6 +244,13 @@ const CancelResult = z.strictObject({
 	job: DaemonJob,
 });
 export type CancelResult = z.infer<typeof CancelResult>;
+
+// Session results
+
+const SessionDiffsResult = z.strictObject({
+	diffs: z.array(FileDiff),
+});
+export type SessionDiffsResult = z.infer<typeof SessionDiffsResult>;
 
 // Provider results
 
@@ -295,6 +320,7 @@ const RequestMethod = z.enum([
 	"job.list",
 	"job.get",
 	"job.cancel",
+	"session.diffs",
 ]);
 export type RequestMethod = z.infer<typeof RequestMethod>;
 
@@ -384,6 +410,14 @@ const JobCancelRequest = z.strictObject({
 	params: JobCancelParams,
 });
 
+// Session requests
+
+const SessionDiffsRequest = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("session.diffs"),
+	params: SessionDiffsParams,
+});
+
 /** Union of every valid request the daemon accepts. */
 export const RequestMessage = z.discriminatedUnion("method", [
 	DaemonHealthRequest,
@@ -399,6 +433,7 @@ export const RequestMessage = z.discriminatedUnion("method", [
 	JobListRequest,
 	JobGetRequest,
 	JobCancelRequest,
+	SessionDiffsRequest,
 ]);
 export type RequestMessage = z.infer<typeof RequestMessage>;
 
@@ -505,6 +540,15 @@ const JobCancelSuccess = z.strictObject({
 	result: CancelResult,
 });
 
+// Session successes
+
+const SessionDiffsSuccess = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("session.diffs"),
+	ok: z.literal(true),
+	result: SessionDiffsResult,
+});
+
 // Error response
 
 const ErrorResponse = z.strictObject({
@@ -530,6 +574,7 @@ export const ResponseMessage = z.union([
 	JobListSuccess,
 	JobGetSuccess,
 	JobCancelSuccess,
+	SessionDiffsSuccess,
 	ErrorResponse,
 ]);
 export type ResponseMessage = z.infer<typeof ResponseMessage>;

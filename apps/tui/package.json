@@ -14,6 +14,7 @@
 	},
 	"devDependencies": {
 		"@types/bun": "latest",
+		"@types/diff": "^8.0.0",
 		"@types/react": "^19.2.4"
 	},
 	"peerDependencies": {
@@ -24,9 +25,10 @@
 		"@crustjs/create": "^0.0.4",
 		"@crustjs/plugins": "^0.0.16",
 		"@crustjs/store": "^0.0.4",
-		"@techatnyu/ralphd": "workspace:*",
 		"@opentui/core": "^0.1.77",
 		"@opentui/react": "^0.1.77",
+		"@techatnyu/ralphd": "workspace:*",
+		"diff": "^9.0.0",
 		"react": "^19.2.4"
 	}
 }

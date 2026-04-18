@@ -4,6 +4,7 @@ import { useKeyboard } from "@opentui/react";
 import type { DaemonJob } from "@techatnyu/ralphd";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useMemo, useRef, useState } from "react";
+import { DiffViewer } from "./diff-viewer";
 
 type Role = "user" | "assistant" | "system";
 
@@ -52,6 +53,7 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 	const [isLoading, setIsLoading] = useState(false);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [sessionId, setSessionId] = useState<string | null>(null);
+	const [tab, setTab] = useState<"chat" | "diffs">("chat");
 	const sendLockRef = useRef(false);
 	const chatScrollRef = useRef<ScrollBoxRenderable | null>(null);
 
@@ -63,6 +65,19 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 	}, [isLoading]);
 
 	useKeyboard((event) => {
+		if (event.ctrl && event.name === "r") {
+			if (tab === "chat" && sessionId) {
+				setTab("diffs");
+			} else if (tab === "diffs") {
+				setTab("chat");
+			}
+			return;
+		}
+
+		if (tab !== "chat") {
+			return;
+		}
+
 		if (event.ctrl && event.name === "c") {
 			onQuit();
 		}
@@ -156,6 +171,17 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 		[instanceId, sessionId, isLoading],
 	);
 
+	if (tab === "diffs" && sessionId) {
+		return (
+			<DiffViewer
+				instanceId={instanceId}
+				sessionId={sessionId}
+				onBack={() => setTab("chat")}
+				onQuit={onQuit}
+			/>
+		);
+	}
+
 	return (
 		<box flexDirection="column" flexGrow={1} width="100%">
 			<box flexShrink={0} height={1} width="100%">
@@ -163,7 +189,8 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 					Ralph Chat · {instanceName}
 					{sessionId ? ` · session: ${sessionId.slice(0, 8)}` : ""}
 					{errorMessage ? ` · error: ${errorMessage}` : ""} · PgUp/PgDn or
-					Ctrl+U/Ctrl+D scroll · esc back · ctrl+c quit
+					Ctrl+U/Ctrl+D scroll{sessionId ? " · ctrl+r diffs" : ""} · esc back ·
+					ctrl+c quit
 				</text>
 			</box>
 
