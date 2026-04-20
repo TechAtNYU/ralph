@@ -1,6 +1,7 @@
 import {
 	type AssistantMessage,
 	createOpencode,
+	type Event as OpencodeEvent,
 	type Part,
 	type Session,
 	type TextPartInput,
@@ -65,10 +66,7 @@ export interface ManagedOpencodeRuntime {
 	};
 }
 
-export interface OpencodeRuntimeEvent {
-	type: string;
-	properties: Record<string, unknown>;
-}
+export type OpencodeRuntimeEvent = OpencodeEvent;
 
 export interface OpencodeRuntimeManager {
 	ensureStarted(instanceId: string): Promise<ManagedOpencodeRuntime>;

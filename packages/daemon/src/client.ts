@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 
 import {
 	type JobStreamEvent,
+	JobStreamEvent as JobStreamEventSchema,
 	type ParamsByMethod,
 	RequestMessage as RequestMessageSchema,
 	type RequestMethod,
@@ -86,10 +87,6 @@ function send<M extends RequestMethod>(
 					finish(new Error(parsed.error.message));
 					return;
 				}
-
-				// Stream-event envelopes don't carry a `result` field; they
-				// only flow through streamJob, never the one-shot send() path.
-				if (!("result" in parsed)) continue;
 
 				finish(undefined, parsed.result);
 				return;
@@ -215,10 +212,10 @@ export class DaemonClient {
 
 	/**
 	 * Open a stream over the daemon socket and yield job events as they
-	 * arrive. The first line on the wire is the ack response; every
-	 * subsequent line is a JobStreamEventMessage envelope wrapping a
-	 * JobStreamEvent. The generator returns when a `done` or `error` event
-	 * is received, or when the socket closes.
+	 * arrive. The first line on the wire is the ack response (a normal
+	 * ResponseMessage); every subsequent line is a bare JobStreamEvent.
+	 * The generator returns when a `done` or `error` event is received,
+	 * or when the socket closes.
 	 */
 	async *streamJob(jobId: string): AsyncGenerator<JobStreamEvent> {
 		const request = RequestMessageSchema.parse({
@@ -246,27 +243,24 @@ export class DaemonClient {
 					throw new Error("invalid daemon response");
 				}
 
-				const response = ResponseMessageSchema.safeParse(parsed);
-				if (!response.success) {
-					throw new Error("invalid daemon response");
-				}
-
-				const data = response.data;
-				if (data.id !== request.id) continue;
-
-				if (!data.ok) {
-					throw new Error(data.error.message);
-				}
-
+				// First line is the ack — validate it as a ResponseMessage.
 				if (!acked) {
-					// First success line is the stream ack — no event payload.
+					const response = ResponseMessageSchema.safeParse(parsed);
+					if (!response.success) {
+						throw new Error("invalid daemon response");
+					}
+					if (!response.data.ok) {
+						throw new Error(response.data.error.message);
+					}
 					acked = true;
 					continue;
 				}
 
-				if (!("event" in data)) continue;
-				yield data.event;
-				if (data.event.type === "done" || data.event.type === "error") {
+				// Subsequent lines are bare JobStreamEvent objects.
+				const event = JobStreamEventSchema.safeParse(parsed);
+				if (!event.success) continue;
+				yield event.data;
+				if (event.data.type === "done" || event.data.type === "error") {
 					return;
 				}
 			}

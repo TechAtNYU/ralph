@@ -566,17 +566,6 @@ const JobStreamSuccess = z.strictObject({
 	result: StreamAckResult,
 });
 
-/** Wraps a JobStreamEvent so it can flow through the same line-delimited
- * response channel as RPC results. After the initial ack, every subsequent
- * line on a job.stream connection is one of these. */
-const JobStreamEventMessage = z.strictObject({
-	id: z.string().min(1),
-	method: z.literal("job.stream"),
-	ok: z.literal(true),
-	event: JobStreamEvent,
-});
-export type JobStreamEventMessage = z.infer<typeof JobStreamEventMessage>;
-
 // Error response
 
 const ErrorResponse = z.strictObject({
@@ -603,7 +592,6 @@ export const ResponseMessage = z.union([
 	JobGetSuccess,
 	JobCancelSuccess,
 	JobStreamSuccess,
-	JobStreamEventMessage,
 	ErrorResponse,
 ]);
 export type ResponseMessage = z.infer<typeof ResponseMessage>;
@@ -628,7 +616,7 @@ export type RequestByMethod<M extends RequestMethod> = Extract<
 >;
 export type SuccessByMethod<M extends RequestMethod> = Extract<
 	ResponseMessage,
-	{ method: M; ok: true; result: unknown }
+	{ method: M; ok: true }
 >;
 export type ParamsByMethod<M extends RequestMethod> =
 	RequestByMethod<M>["params"];

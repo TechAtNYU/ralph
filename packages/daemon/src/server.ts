@@ -3,7 +3,6 @@ import { access, chmod, mkdir, rm } from "node:fs/promises";
 import { connect, createServer, type Socket } from "node:net";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
-import { Readable } from "node:stream";
 import type { Part } from "@opencode-ai/sdk/v2";
 import { z } from "zod";
 import { resolveDaemonRuntimeEnv, SOCKET_PATH } from "./env";
@@ -25,7 +24,6 @@ import {
 	type InstanceResult,
 	type JobState,
 	type JobStreamEvent,
-	type JobStreamEventMessage,
 	type ListResult,
 	type ManagedInstance,
 	normalizeIssues,
@@ -38,6 +36,7 @@ import {
 	type ResponseMessage,
 	type ResultByMethod,
 	type ShutdownResult,
+	type StreamAckResult,
 	type SubmitResult,
 } from "./protocol";
 import { StateStore, StoreError } from "./store";
@@ -111,17 +110,13 @@ export class Daemon {
 	) {
 		this.registry = options.registry ?? new OpencodeRegistry();
 		this.registry.setOnEvent((instanceId, event) => {
+			process.stdout.write(`[${event.type}] `);
 			if (event.type === "message.part.delta") {
-				const props = event.properties as {
-					sessionID: string;
-					field: string;
-					delta: string;
-				};
 				this.routeDeltaToJob(
 					instanceId,
-					props.sessionID,
-					props.field,
-					props.delta,
+					event.properties.sessionID,
+					event.properties.field,
+					event.properties.delta,
 				);
 			}
 		});
@@ -140,104 +135,45 @@ export class Daemon {
 		this.scheduleDrain();
 	}
 
-	/** Dispatch a request to its handler. Yields one or more response
-	 * messages — one-shot RPC methods yield once and return; streaming
-	 * methods (currently `job.stream`) yield an ack, then a snapshot, then
-	 * deltas as they arrive, then a terminal `done`/`error` event. The
-	 * connection handler iterates this generator and writes each message to
-	 * the socket. */
-	async *handleRequest(
-		raw: RequestMessage,
-	): AsyncGenerator<ResponseMessage | JobStreamEventMessage> {
+	handleRequest = async (raw: RequestMessage): Promise<ResponseMessage> => {
 		try {
 			switch (raw.method) {
 				case "daemon.health":
-					yield this.success(raw, this.healthResult());
-					return;
+					return this.success(raw, this.healthResult());
 				case "daemon.shutdown": {
 					const result: ShutdownResult = { ok: true };
 					setTimeout(() => this.onShutdown?.(), 50);
-					yield this.success(raw, result);
-					return;
+					return this.success(raw, result);
 				}
 				case "instance.create":
-					yield this.success(raw, await this.handleInstanceCreate(raw));
-					return;
+					return this.success(raw, await this.handleInstanceCreate(raw));
 				case "instance.list":
-					yield this.success(raw, this.handleInstanceList());
-					return;
+					return this.success(raw, this.handleInstanceList());
 				case "instance.get":
-					yield this.success(raw, this.handleInstanceGet(raw));
-					return;
+					return this.success(raw, this.handleInstanceGet(raw));
 				case "instance.start":
-					yield this.success(raw, await this.handleInstanceStart(raw));
-					return;
+					return this.success(raw, await this.handleInstanceStart(raw));
 				case "instance.stop":
-					yield this.success(raw, await this.handleInstanceStop(raw));
-					return;
+					return this.success(raw, await this.handleInstanceStop(raw));
 				case "instance.remove":
-					yield this.success(raw, await this.handleInstanceRemove(raw));
-					return;
+					return this.success(raw, await this.handleInstanceRemove(raw));
 				case "provider.list":
-					yield this.success(raw, await this.handleProviderList(raw));
-					return;
+					return this.success(raw, await this.handleProviderList(raw));
 				case "job.submit":
-					yield this.success(raw, await this.handleJobSubmit(raw));
-					return;
+					return this.success(raw, await this.handleJobSubmit(raw));
 				case "job.list":
-					yield this.success(raw, this.handleJobList(raw));
-					return;
+					return this.success(raw, this.handleJobList(raw));
 				case "job.get":
-					yield this.success(raw, this.handleJobGet(raw));
-					return;
+					return this.success(raw, this.handleJobGet(raw));
 				case "job.cancel":
-					yield this.success(raw, await this.handleJobCancel(raw));
-					return;
+					return this.success(raw, await this.handleJobCancel(raw));
 				case "job.stream":
-					yield* this.streamJobEvents(raw);
-					return;
+					return this.success(raw, this.handleJobStream(raw));
 			}
 		} catch (error) {
-			yield this.failure(raw.id, raw.method, this.toResponseError(error));
+			return this.failure(raw.id, raw.method, this.toResponseError(error));
 		}
-	}
-
-	private async *streamJobEvents(
-		raw: RequestByMethod<"job.stream">,
-	): AsyncGenerator<ResponseMessage | JobStreamEventMessage> {
-		// Validate the job exists and yield the ack first.
-		this.store.assertJob(this.state, raw.params.jobId);
-		yield this.success(raw, { jobId: raw.params.jobId });
-
-		// Bridge the synchronous subscriber callback into an async iterable
-		// via a push-mode object-mode Readable. subscribeJob will
-		// synchronously deliver a snapshot (if running) followed by every
-		// subsequent delta/done/error event — the atomic-sync invariant
-		// inside subscribeJob/routeDeltaToJob ensures no event is lost or
-		// duplicated.
-		const stream = new Readable({ objectMode: true, read() {} });
-		const unsub = this.subscribeJob(raw.params.jobId, (event) => {
-			stream.push(event);
-			if (event.type === "done" || event.type === "error") {
-				stream.push(null);
-			}
-		});
-
-		try {
-			for await (const event of stream as AsyncIterable<JobStreamEvent>) {
-				yield {
-					id: raw.id,
-					method: "job.stream",
-					ok: true,
-					event,
-				} satisfies JobStreamEventMessage;
-				if (event.type === "done" || event.type === "error") return;
-			}
-		} finally {
-			unsub();
-			stream.destroy();
-		}
-	}
+	};
 
 	async shutdown(): Promise<void> {
 		if (this.shutdownPromise) {
@@ -425,6 +361,13 @@ export class Daemon {
 		return {
 			job: this.store.assertJob(this.state, request.params.jobId),
 		};
+	}
+
+	private handleJobStream(
+		request: RequestByMethod<"job.stream">,
+	): StreamAckResult {
+		this.store.assertJob(this.state, request.params.jobId);
+		return { jobId: request.params.jobId };
 	}
 
 	private async handleJobCancel(
@@ -1023,34 +966,28 @@ export function createConnectionHandler(daemon: Daemon) {
 				return;
 			}
 
-			// Unified dispatch: every handler is an async generator yielding
-			// 1+ messages. One-shot RPC methods yield once; streaming methods
-			// yield ack + events + done. The connection handler is agnostic
-			// to which is which.
-			void (async () => {
-				const isStreaming = request.data.method === "job.stream";
-				try {
-					for await (const msg of daemon.handleRequest(request.data)) {
-						if (!writeLine(msg)) break;
-					}
-				} catch (error) {
-					writeLine({
-						id: request.data.id,
-						method: request.data.method,
-						ok: false,
-						error: {
-							code: "internal",
-							message:
-								error instanceof Error ? error.message : "internal error",
-						},
-					} satisfies ErrorResponse);
-				} finally {
-					// Streaming methods close the socket when their generator
-					// returns; one-shot methods leave it open for further
-					// requests on the same connection.
-					if (isStreaming && socket.writable) socket.end();
-				}
-			})();
+			if (request.data.method === "job.stream") {
+				const { jobId } = request.data.params as { jobId: string };
+				void daemon.handleRequest(request.data).then((ack) => {
+					if (!writeLine(ack)) return;
+					if (!ack.ok) return;
+
+					const unsub = daemon.subscribeJob(jobId, (event) => {
+						if (socket.writable) {
+							socket.write(`${JSON.stringify(event)}\n`);
+						}
+						if (event.type === "done" || event.type === "error") {
+							socket.end();
+						}
+					});
+					socket.on("close", unsub);
+				});
+				return;
+			}
+
+			void daemon.handleRequest(request.data).then((response) => {
+				writeLine(response);
+			});
 		});
 	};
 }
