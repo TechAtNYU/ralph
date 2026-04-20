@@ -29,6 +29,7 @@ import {
 	type ListResult,
 	type ManagedInstance,
 	normalizeIssues,
+	type ProviderListResult,
 	type RequestByMethod,
 	type RequestMessage,
 	RequestMessage as RequestMessageSchema,
@@ -176,6 +177,9 @@ export class Daemon {
 					return;
 				case "instance.remove":
 					yield this.success(raw, await this.handleInstanceRemove(raw));
+					return;
+				case "provider.list":
+					yield this.success(raw, await this.handleProviderList(raw));
 					return;
 				case "job.submit":
 					yield this.success(raw, await this.handleJobSubmit(raw));
@@ -373,6 +377,15 @@ export class Daemon {
 		this.state = this.store.removeInstance(this.state, instance.id);
 		await this.store.save(this.state);
 		return { instance };
+	}
+
+	private async handleProviderList(
+		request: RequestByMethod<"provider.list">,
+	): Promise<ProviderListResult> {
+		return this.registry.queryProviders(
+			request.params.directory,
+			request.params.refresh,
+		);
 	}
 
 	private async handleJobSubmit(
