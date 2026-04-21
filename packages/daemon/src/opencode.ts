@@ -114,7 +114,8 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 			return entry.starting;
 		}
 
-		const starting = createOpencode().then(async ({ client, server }) => {
+		const spawn = createOpencode({ port: 0 });
+		const starting = spawn.then(async ({ client, server }) => {
 			const events = await client.event.subscribe();
 			const subscription = this.consumeEvents(instanceId, events);
 			this.eventSubscriptions.set(instanceId, subscription);
