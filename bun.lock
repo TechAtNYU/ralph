@@ -8,7 +8,6 @@
         "@biomejs/biome": "2.3.14",
         "@changesets/changelog-git": "^0.2.1",
         "@changesets/cli": "^2.29.8",
-        "@crustjs/crust": "^0.0.23",
         "turbo": "^2.8.3",
         "typescript": "5.9.2",
       },
@@ -75,8 +74,6 @@
       "name": "@techatnyu/ralphd",
       "version": "0.0.0",
       "dependencies": {
-        "@crustjs/core": "^0.0.16",
-        "@crustjs/plugins": "^0.0.21",
         "@opencode-ai/sdk": "^1.2.10",
         "zod": "^4.3.6",
       },
@@ -191,20 +188,6 @@
     "@crustjs/core": ["@crustjs/core@0.0.16", "", { "peerDependencies": { "typescript": "^6.0.2" } }, "sha512-2yybZnmBjdNH9XisCtDAWUVuBQSobcrdvhVcW8O4GumCF1oM6FHsBVq+gsxOM5PemEqtdpEo78h0rzI7clVcAA=="],
 
     "@crustjs/create": ["@crustjs/create@0.0.4", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-vGbJKCc0zQQdSjfYo4gMYplGvfh1UNRupcyGTR9Rg4U8ej0UpmVLkoSz7b4wcC7XBuLs3pmYaLYZhT/k24SWNQ=="],
-
-    "@crustjs/crust": ["@crustjs/crust@0.0.23", "", { "optionalDependencies": { "@crustjs/crust-darwin-arm64": "0.0.23", "@crustjs/crust-darwin-x64": "0.0.23", "@crustjs/crust-linux-arm64": "0.0.23", "@crustjs/crust-linux-x64": "0.0.23", "@crustjs/crust-windows-arm64": "0.0.23", "@crustjs/crust-windows-x64": "0.0.23" }, "bin": { "crust": "bin/crust.js" } }, "sha512-mghonO4AhMQiNTendaj7qpkguCnp/77tnf1EbMwqSwvTZpAkApcjEwu5+USyky1TLOX9L+UBWA2p7Skz3NIRew=="],
-
-    "@crustjs/crust-darwin-arm64": ["@crustjs/crust-darwin-arm64@0.0.23", "", { "os": "darwin", "cpu": "arm64", "bin": { "crust": "bin/crust-bun-darwin-arm64" } }, "sha512-vsrbtYf6TAURsJ4AzuS9g/CMBwoQ0yDgysuF+Z+8SPSUYfmV4W6MGUVO2rlL+/mhxgiK7Xoo7VxwlR/vDhfy4g=="],
-
-    "@crustjs/crust-darwin-x64": ["@crustjs/crust-darwin-x64@0.0.23", "", { "os": "darwin", "cpu": "x64", "bin": { "crust": "bin/crust-bun-darwin-x64" } }, "sha512-MtDSg5NnpczB1l24H6wAeAhdjVbtHuWGLw2MNO2nm5XwylISoFRTAB4TlNd62nLuxrdXxPtLf5WpRJEU0ZY9SQ=="],
-
-    "@crustjs/crust-linux-arm64": ["@crustjs/crust-linux-arm64@0.0.23", "", { "os": "linux", "cpu": "arm64", "bin": { "crust": "bin/crust-bun-linux-arm64" } }, "sha512-KOgeI+NUNS1xmua+AECsPZN+r2I+6EROnXYTV2iye1bFP0l4rumZMTH4RdX//75smwXqDX301IIPQgfUTLLcog=="],
-
-    "@crustjs/crust-linux-x64": ["@crustjs/crust-linux-x64@0.0.23", "", { "os": "linux", "cpu": "x64", "bin": { "crust": "bin/crust-bun-linux-x64-baseline" } }, "sha512-E1SMop3+kFkPJXHB8g0IqBfz7IvZEyVLYbNhr0SB4mi/8xQPBmR4vfEfPA96kpXQsjgntHN/+sH4G33pc/D6YQ=="],
-
-    "@crustjs/crust-windows-arm64": ["@crustjs/crust-windows-arm64@0.0.23", "", { "os": "win32", "cpu": "arm64", "bin": { "crust": "bin/crust-bun-windows-arm64.exe" } }, "sha512-KERE/UGL7Yn/0DXxO3ickAxkA1zDTmLF8bKQQ1s6f2vbfDjqsZL7bOfkl+B9K5+BSgmnU9j3LdIhpSmxov2cKA=="],
-
-    "@crustjs/crust-windows-x64": ["@crustjs/crust-windows-x64@0.0.23", "", { "os": "win32", "cpu": "x64", "bin": { "crust": "bin/crust-bun-windows-x64-baseline.exe" } }, "sha512-zBl37qIt/MksZfoVKYFoK+CRo/WaDgtrCyIo+NrJxr7esfrrxwwE6y7GfhwRv13AzwsvyXNAwXtVo8Mdo7c61A=="],
 
     "@crustjs/plugins": ["@crustjs/plugins@0.0.21", "", { "dependencies": { "@crustjs/style": "0.0.6" }, "peerDependencies": { "@crustjs/core": "0.0.16", "typescript": "^6.0.2" } }, "sha512-8XAB3UU0ztUxeTsxGuXhOpsDRFXZ1N3/g5fS8QR3GPD/qV940GMp0wsjjAlAyqrY9b7mudYFs0PQmyTTYTTXpw=="],
 

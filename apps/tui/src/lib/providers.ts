@@ -1,4 +1,3 @@
-import type { SelectOption } from "@opentui/core";
 import type { ProviderListResult } from "@techatnyu/ralphd";
 
 /** Provider IDs sorted by popularity to keep common choices near the top. */
@@ -8,8 +7,6 @@ const PROVIDER_PRIORITY: Record<string, number> = {
 	google: 2,
 	openrouter: 3,
 };
-
-export const MODEL_SELECT_SEPARATOR_VALUE = "__separator__";
 
 type ProviderEntry = ProviderListResult["providers"][number];
 
@@ -51,46 +48,4 @@ export function listConnectedModels(result: ProviderListResult): ModelChoice[] {
 					label: `${provider.name}/${model.name}`,
 				})),
 		);
-}
-
-export function buildModelSelectOptions(
-	result: ProviderListResult,
-	recentModels: string[],
-): SelectOption[] {
-	const allModels: SelectOption[] = listConnectedModels(result).map(
-		(choice) => ({
-			name: choice.label,
-			description: choice.ref,
-			value: choice.ref,
-		}),
-	);
-
-	const allByRef = new Map(allModels.map((model) => [model.value, model]));
-	const recentOptions: SelectOption[] = recentModels
-		.filter((ref) => allByRef.has(ref))
-		.map((ref) => allByRef.get(ref) as SelectOption);
-
-	if (recentOptions.length === 0) {
-		return allModels;
-	}
-
-	const recentRefs = new Set(recentModels);
-	const remainingModels = allModels.filter(
-		(model) => !recentRefs.has(model.value as string),
-	);
-
-	return [
-		{
-			name: "-- Recent --",
-			description: "",
-			value: MODEL_SELECT_SEPARATOR_VALUE,
-		},
-		...recentOptions,
-		{
-			name: "-- All Models --",
-			description: "",
-			value: MODEL_SELECT_SEPARATOR_VALUE,
-		},
-		...remainingModels,
-	];
 }

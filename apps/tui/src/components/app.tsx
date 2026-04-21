@@ -8,10 +8,6 @@ import type {
 } from "@techatnyu/ralphd";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useState } from "react";
-import {
-	buildModelSelectOptions,
-	MODEL_SELECT_SEPARATOR_VALUE,
-} from "../lib/providers";
 import { ralphStore, setModelAndRecent } from "../lib/store";
 import { Chat } from "./chat";
 
@@ -25,12 +21,61 @@ interface DashboardData {
 	jobs: DaemonJob[];
 }
 
+/** Provider IDs sorted by popularity — used to push well-known providers to the top. */
+const PROVIDER_PRIORITY: Record<string, number> = {
+	anthropic: 0,
+	openai: 1,
+	google: 2,
+	openrouter: 3,
+};
+
+const SEPARATOR_VALUE = "__separator__";
+
 async function fetchModelOptions(): Promise<SelectOption[]> {
 	const [result, store] = await Promise.all([
 		daemon.providerList({ refresh: true }),
 		ralphStore.read(),
 	]);
-	return buildModelSelectOptions(result, store.recentModels ?? []);
+	const connected = new Set(result.connected);
+	const recentRefs = new Set(store.recentModels ?? []);
+
+	// Build flat list of all connected models
+	const allModels: SelectOption[] = result.providers
+		.filter((provider) => connected.has(provider.id))
+		.sort(
+			(a, b) =>
+				(PROVIDER_PRIORITY[a.id] ?? 99) - (PROVIDER_PRIORITY[b.id] ?? 99) ||
+				a.name.localeCompare(b.name),
+		)
+		.flatMap((provider) =>
+			Object.values(provider.models)
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map((model) => ({
+					name: `${provider.name}/${model.name}`,
+					description: `${provider.id}/${model.id}`,
+					value: `${provider.id}/${model.id}`,
+				})),
+		);
+
+	// Build recent section from stored order, only including models that still exist
+	const allByRef = new Map(allModels.map((m) => [m.value, m]));
+	const recentOptions: SelectOption[] = (store.recentModels ?? [])
+		.filter((ref) => allByRef.has(ref))
+		.map((ref) => allByRef.get(ref) as SelectOption);
+
+	if (recentOptions.length === 0) return allModels;
+
+	// Filter recents out of the "all" section to avoid duplicates
+	const restModels = allModels.filter(
+		(m) => !recentRefs.has(m.value as string),
+	);
+
+	return [
+		{ name: "── Recent ──", description: "", value: SEPARATOR_VALUE },
+		...recentOptions,
+		{ name: "── All Models ──", description: "", value: SEPARATOR_VALUE },
+		...restModels,
+	];
 }
 
 interface AppProps {
@@ -191,10 +236,7 @@ function Dashboard({
 					showScrollIndicator
 					wrapSelection
 					onSelect={(_index, option) => {
-						if (
-							option?.value &&
-							option.value !== MODEL_SELECT_SEPARATOR_VALUE
-						) {
+						if (option?.value && option.value !== SEPARATOR_VALUE) {
 							const modelRef = option.value as string;
 							void setModelAndRecent(modelRef).then(() => {
 								setCurrentModel(modelRef);

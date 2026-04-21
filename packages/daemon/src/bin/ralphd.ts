@@ -1,7 +1,3 @@
-import app from "../cli";
+import { runDaemonServer } from "../server";
 
-export { app };
-
-if (import.meta.main) {
-	await app.execute();
-}
+void runDaemonServer();

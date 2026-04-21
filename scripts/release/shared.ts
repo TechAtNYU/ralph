@@ -152,51 +152,6 @@ async function runCommand(command: string, args: string[], cwd?: string) {
 	await new Promise<void>((resolve, reject) => {
 		const child = spawn(command, args, {
 			cwd,
-			env: process.env,
-			stdio: "inherit",
-		});
-
-		child.once("error", reject);
-		child.once("exit", (code) => {
-			if ((code ?? 0) !== 0) {
-				reject(
-					new Error(
-						`${command} ${args.join(" ")} exited with code ${code ?? 1}`,
-					),
-				);
-				return;
-			}
-			resolve();
-		});
-	});
-}
-
-function getCrustTarget(target: SupportedTarget): string {
-	switch (target) {
-		case "bun-linux-x64":
-			return "linux-x64";
-		case "bun-linux-arm64":
-			return "linux-arm64";
-		case "bun-windows-x64":
-			return "windows-x64";
-		case "bun-windows-arm64":
-			return "windows-arm64";
-		case "bun-darwin-x64":
-			return "darwin-x64";
-		case "bun-darwin-arm64":
-			return "darwin-arm64";
-	}
-}
-
-async function runCommandWithEnv(
-	command: string,
-	args: string[],
-	options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
-) {
-	await new Promise<void>((resolve, reject) => {
-		const child = spawn(command, args, {
-			cwd: options.cwd,
-			env: options.env ?? process.env,
 			stdio: "inherit",
 		});
 
@@ -296,15 +251,10 @@ if not exist "%bin_path%" (
 }
 
 export async function buildBinaries(
-	options: {
-		targets?: SupportedTarget[];
-		outDir?: string;
-		version?: string;
-	} = {},
+	options: { targets?: SupportedTarget[]; outDir?: string } = {},
 ): Promise<BinaryBuildResult[]> {
 	const targets = options.targets ?? [...SUPPORTED_TARGETS];
 	const outDir = options.outDir ?? DEFAULT_COMPILED_DIR;
-	const version = options.version ?? (await getRootPackageVersion());
 	const entries = [
 		{
 			name: "ralph" as const,
@@ -340,29 +290,22 @@ export async function buildBinaries(
 
 		for (const entry of entries) {
 			const outfile = join(targetDir, getBinaryFilename(entry.name, spec));
-			await runCommandWithEnv(
-				"bunx",
-				[
-					"crust",
-					"build",
-					"--entry",
-					entry.entrypoint,
-					"--target",
-					getCrustTarget(target),
-					"--outfile",
+			const build = await Bun.build({
+				entrypoints: [entry.entrypoint],
+				minify: false,
+				compile: {
+					target,
 					outfile,
-					"--name",
-					entry.name,
-					"--no-minify",
-				],
-				{
-					cwd: REPO_ROOT,
-					env: {
-						...process.env,
-						PUBLIC_RALPH_VERSION: version,
-					},
 				},
-			);
+			});
+			if (!build.success) {
+				const errors = build.logs
+					.map((log) => log.message ?? String(log))
+					.join("\n");
+				throw new Error(
+					`Failed to build ${entry.name} for ${target}\n${errors}`,
+				);
+			}
 			binaries[entry.name] = outfile;
 		}
 
