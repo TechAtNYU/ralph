@@ -1,7 +1,10 @@
 import { access } from "node:fs/promises";
 import { connect } from "node:net";
+import { createInterface } from "node:readline";
 
 import {
+	type JobStreamEvent,
+	JobStreamEvent as JobStreamEventSchema,
 	type ParamsByMethod,
 	RequestMessage as RequestMessageSchema,
 	type RequestMethod,
@@ -205,6 +208,66 @@ export class DaemonClient {
 		return send(this.socketPath, "job.cancel", { jobId }) as Promise<
 			ResultByMethod<"job.cancel">
 		>;
+	}
+
+	/**
+	 * Open a stream over the daemon socket and yield job events as they
+	 * arrive. The first line on the wire is the ack response (a normal
+	 * ResponseMessage); every subsequent line is a bare JobStreamEvent.
+	 * The generator returns when a `done` or `error` event is received,
+	 * or when the socket closes.
+	 */
+	async *streamJob(jobId: string): AsyncGenerator<JobStreamEvent> {
+		const request = RequestMessageSchema.parse({
+			id: Bun.randomUUIDv7(),
+			method: "job.stream",
+			params: { jobId },
+		});
+
+		const socket = connect(this.socketPath);
+		socket.setEncoding("utf8");
+		socket.on("error", () => {});
+		const rl = createInterface({ input: socket });
+
+		try {
+			socket.write(`${JSON.stringify(request)}\n`);
+
+			let acked = false;
+			for await (const line of rl) {
+				if (!line.trim()) continue;
+
+				let parsed: unknown;
+				try {
+					parsed = JSON.parse(line) as unknown;
+				} catch {
+					throw new Error("invalid daemon response");
+				}
+
+				// First line is the ack — validate it as a ResponseMessage.
+				if (!acked) {
+					const response = ResponseMessageSchema.safeParse(parsed);
+					if (!response.success) {
+						throw new Error("invalid daemon response");
+					}
+					if (!response.data.ok) {
+						throw new Error(response.data.error.message);
+					}
+					acked = true;
+					continue;
+				}
+
+				// Subsequent lines are bare JobStreamEvent objects.
+				const event = JobStreamEventSchema.safeParse(parsed);
+				if (!event.success) continue;
+				yield event.data;
+				if (event.data.type === "done" || event.data.type === "error") {
+					return;
+				}
+			}
+		} finally {
+			rl.close();
+			socket.destroy();
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { access, chmod, mkdir, rm } from "node:fs/promises";
 import { connect, createServer, type Socket } from "node:net";
 import { dirname } from "node:path";
+import { createInterface } from "node:readline";
 import type { Part } from "@opencode-ai/sdk/v2";
 import { z } from "zod";
 import { resolveDaemonRuntimeEnv, SOCKET_PATH } from "./env";
@@ -22,6 +23,7 @@ import {
 	type InstanceListResult,
 	type InstanceResult,
 	type JobState,
+	type JobStreamEvent,
 	type ListResult,
 	type ManagedInstance,
 	normalizeIssues,
@@ -34,6 +36,7 @@ import {
 	type ResponseMessage,
 	type ResultByMethod,
 	type ShutdownResult,
+	type StreamAckResult,
 	type SubmitResult,
 } from "./protocol";
 import { StateStore, StoreError } from "./store";
@@ -89,6 +92,10 @@ export class Daemon {
 	private readonly queues = new Map<string, string[]>();
 	private readonly runningJobs = new Map<string, RunningJob>();
 	private readonly runningTasks = new Map<string, Promise<void>>();
+	private readonly jobStreams = new Map<
+		string,
+		Set<(event: JobStreamEvent) => void>
+	>();
 	private startedAt = Date.now();
 	private onShutdown: (() => void) | undefined;
 	private drainPromise: Promise<void> | undefined;
@@ -102,6 +109,17 @@ export class Daemon {
 		options: DaemonOptions = {},
 	) {
 		this.registry = options.registry ?? new OpencodeRegistry();
+		this.registry.setOnEvent((instanceId, event) => {
+			process.stdout.write(`[${event.type}] `);
+			if (event.type === "message.part.delta") {
+				this.routeDeltaToJob(
+					instanceId,
+					event.properties.sessionID,
+					event.properties.field,
+					event.properties.delta,
+				);
+			}
+		});
 		this.maxConcurrency =
 			options.maxConcurrency ?? resolveDaemonRuntimeEnv().maxConcurrency;
 	}
@@ -149,6 +167,8 @@ export class Daemon {
 					return this.success(raw, this.handleJobGet(raw));
 				case "job.cancel":
 					return this.success(raw, await this.handleJobCancel(raw));
+				case "job.stream":
+					return this.success(raw, this.handleJobStream(raw));
 			}
 		} catch (error) {
 			return this.failure(raw.id, raw.method, this.toResponseError(error));
@@ -343,6 +363,13 @@ export class Daemon {
 		};
 	}
 
+	private handleJobStream(
+		request: RequestByMethod<"job.stream">,
+	): StreamAckResult {
+		this.store.assertJob(this.state, request.params.jobId);
+		return { jobId: request.params.jobId };
+	}
+
 	private async handleJobCancel(
 		request: RequestByMethod<"job.cancel">,
 	): Promise<CancelResult> {
@@ -390,6 +417,98 @@ export class Daemon {
 		}
 
 		return { job };
+	}
+
+	/**
+	 * Subscribe to a job's stream events. Synchronously delivers a snapshot
+	 * of the current accumulated text (if the job is running) before
+	 * registering the callback for future events. If the job is already in
+	 * a terminal state, immediately delivers a `done` event and returns a
+	 * no-op unsubscribe.
+	 *
+	 * MUST remain fully synchronous. The snapshot read and subscriber
+	 * registration must happen in the same synchronous block so no delta
+	 * can interleave between them — see the concurrency note in
+	 * routeDeltaToJob.
+	 */
+	subscribeJob(jobId: string, cb: (event: JobStreamEvent) => void): () => void {
+		const job = this.store.getJob(this.state, jobId);
+		if (
+			job &&
+			(job.state === "succeeded" ||
+				job.state === "failed" ||
+				job.state === "cancelled")
+		) {
+			cb({ type: "done", jobId, job });
+			return () => {};
+		}
+
+		// ATOMIC SECTION — no `await` allowed below this line until cb is
+		// invoked with the snapshot. JS is single-threaded so any delta
+		// arriving after this block is guaranteed to either land in the
+		// snapshot text or be delivered to us as a delta event.
+		let subscribers = this.jobStreams.get(jobId);
+		if (!subscribers) {
+			subscribers = new Set();
+			this.jobStreams.set(jobId, subscribers);
+		}
+		const subscriberSet = subscribers;
+		subscriberSet.add(cb);
+		const snapshotText = job?.outputText ?? "";
+		// END ATOMIC SECTION
+
+		// Deliver the snapshot directly to this subscriber only — never via
+		// emitJobEvent, which would broadcast to existing subscribers too.
+		cb({ type: "snapshot", jobId, text: snapshotText });
+
+		return () => {
+			subscriberSet.delete(cb);
+			if (subscriberSet.size === 0) {
+				this.jobStreams.delete(jobId);
+			}
+		};
+	}
+
+	private emitJobEvent(jobId: string, event: JobStreamEvent): void {
+		const subscribers = this.jobStreams.get(jobId);
+		if (!subscribers) return;
+
+		for (const cb of subscribers) {
+			cb(event);
+		}
+
+		if (event.type === "done" || event.type === "error") {
+			this.jobStreams.delete(jobId);
+		}
+	}
+
+	/**
+	 * Route an incoming delta from the OpenCode event stream to the matching
+	 * running job. Synchronously appends the delta to the job's accumulated
+	 * `outputText` (only for `text` field deltas) BEFORE emitting the event,
+	 * so the daemon's job state always reflects what subscribers have seen.
+	 *
+	 * MUST remain fully synchronous to preserve the snapshot/delta ordering
+	 * guarantee — see the concurrency note in subscribeJob.
+	 */
+	private routeDeltaToJob(
+		instanceId: string,
+		sessionId: string,
+		field: string,
+		delta: string,
+	): void {
+		for (const [jobId, running] of this.runningJobs) {
+			if (running.instanceId !== instanceId) continue;
+			const job = this.store.getJob(this.state, jobId);
+			if (job?.sessionId === sessionId) {
+				if (field === "text") {
+					job.outputText = (job.outputText ?? "") + delta;
+					job.updatedAt = new Date().toISOString();
+				}
+				this.emitJobEvent(jobId, { type: "delta", jobId, field, delta });
+				return;
+			}
+		}
 	}
 
 	private async recoverPersistedState(
@@ -551,7 +670,13 @@ export class Daemon {
 						parts: [{ type: "text", text: job.task.prompt }],
 					});
 					job.messageId = response.info.id;
-					job.outputText = extractText(response.parts);
+					// Prefer accumulated text from streamed deltas; fall back to
+					// the final parts payload if no deltas were received (e.g. a
+					// non-streaming provider).
+					const finalText = extractText(response.parts);
+					if (!job.outputText || job.outputText.length === 0) {
+						job.outputText = finalText;
+					}
 					job.error = undefined;
 					job.state = controller.signal.aborted ? "cancelled" : "succeeded";
 					break;
@@ -566,6 +691,7 @@ export class Daemon {
 			job.endedAt = new Date().toISOString();
 			job.updatedAt = job.endedAt;
 			this.state = this.store.upsertJob(this.state, job);
+			this.emitJobEvent(job.id, { type: "done", jobId: job.id, job });
 		}
 	}
 
@@ -783,74 +909,85 @@ export function createConnectionHandler(daemon: Daemon) {
 	return (socket: Socket) => {
 		socket.setEncoding("utf8");
 		socket.on("error", () => {});
-		let buffer = "";
+		const rl = createInterface({ input: socket });
+		socket.on("close", () => rl.close());
 
-		socket.on("data", (chunk) => {
-			buffer += chunk;
-			const lines = buffer.split("\n");
-			buffer = lines.pop() ?? "";
+		const writeLine = (msg: unknown): boolean => {
+			if (!socket.writable) return false;
+			socket.write(`${JSON.stringify(msg)}\n`);
+			return true;
+		};
 
-			for (const line of lines) {
-				if (!line.trim()) {
-					continue;
-				}
+		rl.on("line", (line) => {
+			if (!line.trim()) return;
 
-				let parsed: unknown;
-				try {
-					parsed = JSON.parse(line) as unknown;
-				} catch {
-					const response: ErrorResponse = {
-						id: randomUUID(),
-						method: "unknown",
-						ok: false,
-						error: {
-							code: "invalid_json",
-							message: "invalid json request",
-						},
-					};
-					socket.write(`${JSON.stringify(response)}\n`);
-					continue;
-				}
-
-				const request = RequestMessageSchema.safeParse(parsed);
-				if (!request.success) {
-					const maybeMethod =
-						typeof parsed === "object" &&
-						parsed !== null &&
-						"method" in parsed &&
-						typeof parsed.method === "string"
-							? parsed.method
-							: "unknown";
-					const maybeId =
-						typeof parsed === "object" &&
-						parsed !== null &&
-						"id" in parsed &&
-						typeof parsed.id === "string"
-							? parsed.id
-							: randomUUID();
-					const response: ErrorResponse = {
-						id: maybeId,
-						method:
-							maybeMethod === "unknown"
-								? "unknown"
-								: (maybeMethod as RequestMethod | "unknown"),
-						ok: false,
-						error: {
-							code: "invalid_request",
-							message: "request validation failed",
-							issues: normalizeIssues(request.error),
-						},
-					};
-					socket.write(`${JSON.stringify(response)}\n`);
-					continue;
-				}
-
-				void daemon.handleRequest(request.data).then((response) => {
-					if (socket.writable) {
-						socket.write(`${JSON.stringify(response)}\n`);
-					}
-				});
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(line) as unknown;
+			} catch {
+				writeLine({
+					id: randomUUID(),
+					method: "unknown",
+					ok: false,
+					error: { code: "invalid_json", message: "invalid json request" },
+				} satisfies ErrorResponse);
+				return;
 			}
+
+			const request = RequestMessageSchema.safeParse(parsed);
+			if (!request.success) {
+				const maybeMethod =
+					typeof parsed === "object" &&
+					parsed !== null &&
+					"method" in parsed &&
+					typeof parsed.method === "string"
+						? parsed.method
+						: "unknown";
+				const maybeId =
+					typeof parsed === "object" &&
+					parsed !== null &&
+					"id" in parsed &&
+					typeof parsed.id === "string"
+						? parsed.id
+						: randomUUID();
+				writeLine({
+					id: maybeId,
+					method:
+						maybeMethod === "unknown"
+							? "unknown"
+							: (maybeMethod as RequestMethod | "unknown"),
+					ok: false,
+					error: {
+						code: "invalid_request",
+						message: "request validation failed",
+						issues: normalizeIssues(request.error),
+					},
+				} satisfies ErrorResponse);
+				return;
+			}
+
+			if (request.data.method === "job.stream") {
+				const { jobId } = request.data.params as { jobId: string };
+				void daemon.handleRequest(request.data).then((ack) => {
+					if (!writeLine(ack)) return;
+					if (!ack.ok) return;
+
+					const unsub = daemon.subscribeJob(jobId, (event) => {
+						if (socket.writable) {
+							socket.write(`${JSON.stringify(event)}\n`);
+						}
+						if (event.type === "done" || event.type === "error") {
+							socket.end();
+						}
+					});
+					socket.on("close", unsub);
+				});
+				return;
+			}
+
+			void daemon.handleRequest(request.data).then((response) => {
+				writeLine(response);
+			});
 		});
 	};
 }

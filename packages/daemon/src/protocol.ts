@@ -161,6 +161,11 @@ const JobCancelParams = z.strictObject({
 });
 export type JobCancelParams = z.infer<typeof JobCancelParams>;
 
+const JobStreamParams = z.strictObject({
+	jobId: z.string().min(1),
+});
+export type JobStreamParams = z.infer<typeof JobStreamParams>;
+
 // ---------------------------------------------------------------------------
 // Result schemas — per-method response payloads (success path)
 // ---------------------------------------------------------------------------
@@ -227,6 +232,47 @@ const CancelResult = z.strictObject({
 });
 export type CancelResult = z.infer<typeof CancelResult>;
 
+const StreamAckResult = z.strictObject({
+	jobId: z.string().min(1),
+});
+export type StreamAckResult = z.infer<typeof StreamAckResult>;
+
+// ---------------------------------------------------------------------------
+// Job stream events — pushed over an open socket after the stream ack
+// ---------------------------------------------------------------------------
+
+const JobStreamSnapshot = z.strictObject({
+	type: z.literal("snapshot"),
+	jobId: z.string().min(1),
+	text: z.string(),
+});
+
+const JobStreamDelta = z.strictObject({
+	type: z.literal("delta"),
+	jobId: z.string().min(1),
+	field: z.string().min(1),
+	delta: z.string(),
+});
+
+const JobStreamDone = z.strictObject({
+	type: z.literal("done"),
+	jobId: z.string().min(1),
+	job: DaemonJob,
+});
+
+const JobStreamError = z.strictObject({
+	type: z.literal("error"),
+	jobId: z.string().min(1),
+	error: z.string().min(1),
+});
+
+export const JobStreamEvent = z.discriminatedUnion("type", [
+	JobStreamSnapshot,
+	JobStreamDelta,
+	JobStreamDone,
+	JobStreamError,
+]);
+export type JobStreamEvent = z.infer<typeof JobStreamEvent>;
 // Provider results
 
 const ProviderModel = z.strictObject({
@@ -295,6 +341,7 @@ const RequestMethod = z.enum([
 	"job.list",
 	"job.get",
 	"job.cancel",
+	"job.stream",
 ]);
 export type RequestMethod = z.infer<typeof RequestMethod>;
 
@@ -384,6 +431,12 @@ const JobCancelRequest = z.strictObject({
 	params: JobCancelParams,
 });
 
+const JobStreamRequest = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("job.stream"),
+	params: JobStreamParams,
+});
+
 /** Union of every valid request the daemon accepts. */
 export const RequestMessage = z.discriminatedUnion("method", [
 	DaemonHealthRequest,
@@ -399,6 +452,7 @@ export const RequestMessage = z.discriminatedUnion("method", [
 	JobListRequest,
 	JobGetRequest,
 	JobCancelRequest,
+	JobStreamRequest,
 ]);
 export type RequestMessage = z.infer<typeof RequestMessage>;
 
@@ -505,6 +559,13 @@ const JobCancelSuccess = z.strictObject({
 	result: CancelResult,
 });
 
+const JobStreamSuccess = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("job.stream"),
+	ok: z.literal(true),
+	result: StreamAckResult,
+});
+
 // Error response
 
 const ErrorResponse = z.strictObject({
@@ -530,6 +591,7 @@ export const ResponseMessage = z.union([
 	JobListSuccess,
 	JobGetSuccess,
 	JobCancelSuccess,
+	JobStreamSuccess,
 	ErrorResponse,
 ]);
 export type ResponseMessage = z.infer<typeof ResponseMessage>;

@@ -2,6 +2,7 @@ import type { AssistantMessage, Part, Session } from "@opencode-ai/sdk/v2";
 
 import type {
 	ManagedOpencodeRuntime,
+	OpencodeRuntimeEvent,
 	OpencodeRuntimeManager,
 } from "../opencode";
 
@@ -61,8 +62,27 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 	}> = [];
 	readonly abortCalls: Array<{ instanceId: string; sessionId: string }> = [];
 	globalMaxConcurrent = 0;
+	/** Configurable per-test: an array of text deltas the fake will emit
+	 * via the wired onEvent handler before returning the final response
+	 * from prompt(). */
+	streamingDeltas: string[] = [];
+	/** Delay between successive emitted deltas. */
+	deltaIntervalMs = 5;
+	private onEvent?: (instanceId: string, event: OpencodeRuntimeEvent) => void;
 
 	constructor(private readonly delayMs = 25) {}
+
+	setOnEvent(
+		handler: (instanceId: string, event: OpencodeRuntimeEvent) => void,
+	): void {
+		this.onEvent = handler;
+	}
+
+	/** Manually emit an event as if it came from a managed runtime. Used
+	 * by tests that want fine-grained control over timing. */
+	emitEvent(instanceId: string, event: OpencodeRuntimeEvent): void {
+		this.onEvent?.(instanceId, event);
+	}
 
 	async ensureStarted(instanceId: string): Promise<ManagedOpencodeRuntime> {
 		const existing = this.runtimes.get(instanceId);
@@ -105,14 +125,40 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 						);
 
 						try {
-							await Bun.sleep(this.delayMs);
+							const messageId = `message-${this.messageSequence++}`;
+
+							// Emit configured streaming deltas via the wired event
+							// handler. Each one routes to routeDeltaToJob in the
+							// daemon, accumulating into job.outputText and
+							// dispatching to subscribers.
+							if (this.streamingDeltas.length > 0) {
+								for (const delta of this.streamingDeltas) {
+									await Bun.sleep(this.deltaIntervalMs);
+									this.onEvent?.(instanceId, {
+										type: "message.part.delta",
+										properties: {
+											sessionID: sessionId,
+											messageID: messageId,
+											partID: `part-${messageId}`,
+											field: "text",
+											delta,
+										},
+									});
+								}
+							} else {
+								await Bun.sleep(this.delayMs);
+							}
+
 							if (prompt.includes("fail")) {
 								throw new Error(`prompt failed for ${instanceId}`);
 							}
-							const messageId = `message-${this.messageSequence++}`;
+							const finalText =
+								this.streamingDeltas.length > 0
+									? this.streamingDeltas.join("")
+									: `reply:${prompt}`;
 							return {
 								info: fakeAssistantMessage({ id: messageId }),
-								parts: [fakeTextPart({ text: `reply:${prompt}` })],
+								parts: [fakeTextPart({ text: finalText })],
 							};
 						} finally {
 							this.activeByInstance.set(instanceId, active - 1);

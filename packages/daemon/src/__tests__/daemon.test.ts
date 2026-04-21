@@ -23,7 +23,7 @@ function expectSuccess<M extends RequestMethod>(
 	method: M,
 ): ResultByMethod<M> {
 	expect(response.ok).toBe(true);
-	if (!response.ok || response.method !== method) {
+	if (!response.ok || response.method !== method || !("result" in response)) {
 		throw new Error(`expected success for ${method}`);
 	}
 	return response.result as ResultByMethod<M>;
@@ -306,5 +306,186 @@ describe("Daemon", () => {
 			expectSuccess(response, "job.get").job.state,
 		);
 		await nextDaemon.shutdown();
+	});
+});
+
+describe("Daemon streaming", () => {
+	let tmpDir: string;
+	let store: StateStore;
+	let registry: FakeOpencodeRegistry;
+	let daemon: Daemon;
+
+	beforeEach(async () => {
+		tmpDir = await mkdtemp(join(tmpdir(), "ralph-daemon-stream-"));
+		store = new StateStore(join(tmpDir, "state.json"));
+		registry = new FakeOpencodeRegistry(40);
+		daemon = new Daemon(store, { registry });
+		await daemon.bootstrap();
+	});
+
+	afterEach(async () => {
+		await daemon.shutdown();
+		await rm(tmpDir, { recursive: true, force: true });
+	});
+
+	async function createInstanceAndSubmit(
+		prompt: string,
+	): Promise<{ instanceId: string; jobId: string }> {
+		const created = await daemon.handleRequest(
+			req({
+				id: "instance-create",
+				method: "instance.create",
+				params: { name: "One", directory: "/tmp/project-one" },
+			}),
+		);
+		const instance = expectSuccess(created, "instance.create");
+		const submitted = await daemon.handleRequest(
+			req({
+				id: "job-submit",
+				method: "job.submit",
+				params: {
+					instanceId: instance.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt },
+				},
+			}),
+		);
+		const submitResult = expectSuccess(submitted, "job.submit");
+		return {
+			instanceId: instance.instance.id,
+			jobId: submitResult.job.id,
+		};
+	}
+
+	test("subscribeJob delivers an immediate done for a terminal job", async () => {
+		const { jobId } = await createInstanceAndSubmit("hello");
+		await Bun.sleep(120);
+
+		const events: Array<{ type: string }> = [];
+		const unsub = daemon.subscribeJob(jobId, (event) => {
+			events.push(event);
+		});
+
+		expect(events).toHaveLength(1);
+		expect(events[0]?.type).toBe("done");
+		unsub();
+	});
+
+	test("subscribeJob delivers a snapshot for a running job", async () => {
+		registry.streamingDeltas = [" hello", " world", "!"];
+		registry.deltaIntervalMs = 30;
+
+		const { jobId } = await createInstanceAndSubmit("hi");
+		await Bun.sleep(45);
+
+		const events: Array<
+			| { type: "snapshot"; text: string }
+			| { type: "delta"; delta: string }
+			| { type: "done" }
+			| { type: "error" }
+		> = [];
+		const unsub = daemon.subscribeJob(jobId, (event) => {
+			events.push(event as never);
+		});
+
+		expect(events[0]?.type).toBe("snapshot");
+		const snapshot = events[0] as { type: "snapshot"; text: string };
+		expect(snapshot.text.length).toBeGreaterThan(0);
+
+		await Bun.sleep(150);
+		unsub();
+
+		const types = events.map((e) => e.type);
+		expect(types[0]).toBe("snapshot");
+		expect(types[types.length - 1]).toBe("done");
+		expect(types).toContain("delta");
+	});
+
+	test("deltas accumulate into job.outputText", async () => {
+		registry.streamingDeltas = ["foo ", "bar ", "baz"];
+
+		const { jobId } = await createInstanceAndSubmit("ignored");
+		await Bun.sleep(120);
+
+		const get = await daemon.handleRequest(
+			req({ id: "g", method: "job.get", params: { jobId } }),
+		);
+		const job = expectSuccess(get, "job.get").job;
+		expect(job.state).toBe("succeeded");
+		expect(job.outputText).toBe("foo bar baz");
+	});
+
+	test("executeJob preserves accumulated text rather than overwriting with parts", async () => {
+		registry.streamingDeltas = ["a", "b", "c"];
+		registry.deltaIntervalMs = 25;
+
+		const { jobId } = await createInstanceAndSubmit("test");
+
+		await Bun.sleep(40);
+		let mid = await daemon.handleRequest(
+			req({ id: "g1", method: "job.get", params: { jobId } }),
+		);
+		let midJob = expectSuccess(mid, "job.get").job;
+		expect(midJob.state).toBe("running");
+		expect(midJob.outputText?.length ?? 0).toBeGreaterThan(0);
+		expect(midJob.outputText?.length ?? 0).toBeLessThan(3);
+
+		await Bun.sleep(100);
+		mid = await daemon.handleRequest(
+			req({ id: "g2", method: "job.get", params: { jobId } }),
+		);
+		midJob = expectSuccess(mid, "job.get").job;
+		expect(midJob.state).toBe("succeeded");
+		expect(midJob.outputText).toBe("abc");
+	});
+
+	test("executeJob falls back to extractText when no deltas were emitted", async () => {
+		const { jobId } = await createInstanceAndSubmit("plain");
+		await Bun.sleep(80);
+
+		const get = await daemon.handleRequest(
+			req({ id: "g", method: "job.get", params: { jobId } }),
+		);
+		const job = expectSuccess(get, "job.get").job;
+		expect(job.state).toBe("succeeded");
+		expect(job.outputText).toBe("reply:plain");
+	});
+
+	test("late subscriber gets snapshot of accumulated text and continues without duplicates", async () => {
+		registry.streamingDeltas = ["alpha ", "beta ", "gamma ", "delta"];
+		registry.deltaIntervalMs = 25;
+
+		const { jobId } = await createInstanceAndSubmit("late");
+		await Bun.sleep(70);
+
+		const events: Array<
+			| { type: "snapshot"; text: string }
+			| { type: "delta"; delta: string }
+			| { type: "done" }
+			| { type: "error" }
+		> = [];
+		const unsub = daemon.subscribeJob(jobId, (event) => {
+			events.push(event as never);
+		});
+
+		await Bun.sleep(150);
+		unsub();
+
+		const first = events[0];
+		if (first?.type !== "snapshot") {
+			throw new Error("expected first event to be snapshot");
+		}
+		expect(first.text.length).toBeGreaterThan(0);
+
+		const observedFromSnapshot = events
+			.slice(1)
+			.filter((e): e is { type: "delta"; delta: string } => e.type === "delta")
+			.reduce((acc, e) => acc + e.delta, first.text);
+
+		const get = await daemon.handleRequest(
+			req({ id: "g", method: "job.get", params: { jobId } }),
+		);
+		const finalText = expectSuccess(get, "job.get").job.outputText ?? "";
+		expect(observedFromSnapshot).toBe(finalText);
 	});
 });
