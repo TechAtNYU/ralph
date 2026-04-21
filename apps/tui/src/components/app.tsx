@@ -118,6 +118,25 @@ function Dashboard({
 	const [modelPicker, setModelPicker] = useState(false);
 	const [modelOptions, setModelOptions] = useState<SelectOption[]>([]);
 	const [fetchingModels, setFetchingModels] = useState(false);
+	const [query, setQuery] = useState("");
+	const [cursorOn, setCursorOn] = useState(true);
+
+	useEffect(() => {
+		if (!modelPicker) return;
+		const id = setInterval(() => setCursorOn((v) => !v), 500);
+		return () => clearInterval(id);
+	}, [modelPicker]);
+
+	const q = query.toLowerCase();
+	const visibleOptions = q
+		? modelOptions.filter(
+				(o) =>
+					o.value !== SEPARATOR_VALUE &&
+					(o.name.toLowerCase().includes(q) ||
+						(typeof o.description === "string" &&
+							o.description.toLowerCase().includes(q))),
+			)
+		: modelOptions;
 
 	const refresh = useCallback(
 		async (nextIndex = selectedIndex) => {
@@ -160,8 +179,24 @@ function Dashboard({
 
 	useKeyboard((key) => {
 		if (modelPicker) {
-			if (key.name === "escape" || key.name === "q") {
+			if (key.name === "escape") {
 				setModelPicker(false);
+				setQuery("");
+				return;
+			}
+			if (key.name === "backspace") {
+				setQuery((prev) => prev.slice(0, -1));
+				return;
+			}
+			if (
+				!key.ctrl &&
+				!key.meta &&
+				typeof key.sequence === "string" &&
+				key.sequence.length === 1 &&
+				key.sequence >= " " &&
+				key.sequence <= "~"
+			) {
+				setQuery((prev) => prev + key.sequence);
 			}
 			return;
 		}
@@ -177,6 +212,7 @@ function Dashboard({
 		}
 
 		if (key.name === "m" && !fetchingModels) {
+			setQuery("");
 			setFetchingModels(true);
 			void fetchModelOptions()
 				.then((options) => {
@@ -222,16 +258,36 @@ function Dashboard({
 	if (modelPicker) {
 		return (
 			<box flexDirection="column" flexGrow={1} padding={1}>
-				<box flexDirection="column" marginBottom={1}>
+				<box
+					flexDirection="row"
+					justifyContent="space-between"
+					marginBottom={1}
+				>
 					<text attributes={TextAttributes.BOLD}>Select Model</text>
-					<text attributes={TextAttributes.DIM}>
-						{`${modelOptions.length} models available — esc: cancel`}
-					</text>
+					<text attributes={TextAttributes.DIM}>esc</text>
+				</box>
+				<box
+					border
+					borderStyle="single"
+					borderColor="#666"
+					paddingLeft={1}
+					paddingRight={1}
+					marginBottom={1}
+					height={3}
+				>
+					{query ? (
+						<text>{`${query}${cursorOn ? "\u2588" : " "}`}</text>
+					) : (
+						<text attributes={TextAttributes.DIM}>
+							{`${cursorOn ? "\u2588" : "S"}earch`}
+						</text>
+					)}
 				</box>
 				<select
+					key={query}
 					focused
 					flexGrow={1}
-					options={modelOptions}
+					options={visibleOptions}
 					showDescription
 					showScrollIndicator
 					wrapSelection
