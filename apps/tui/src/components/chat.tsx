@@ -4,6 +4,8 @@ import { useKeyboard } from "@opentui/react";
 import type { DaemonJob } from "@techatnyu/ralphd";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPromptTask } from "../lib/prompt-task";
+import { ralphStore } from "../lib/store";
 
 type Role = "user" | "assistant" | "system";
 
@@ -283,14 +285,15 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 					| { type: "existing"; sessionId: string } = sessionId
 					? { type: "existing", sessionId }
 					: { type: "new" };
+				const { model: storedModel } = await ralphStore.read();
 
 				const submitted = await daemon.submitJob({
 					instanceId,
 					session,
-					task: {
-						type: "prompt",
+					task: createPromptTask({
 						prompt: trimmedValue,
-					},
+						storedModel,
+					}),
 				});
 
 				setMessages((prev) => [...prev, assistantPlaceholder]);
