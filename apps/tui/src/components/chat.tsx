@@ -335,23 +335,29 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 				marginBottom={0}
 			>
 				{messages.map((message) => {
-					const label =
-						message.role === "user"
-							? "You"
-							: message.role === "assistant"
-								? "Assistant"
-								: "System";
+					if (message.role === "user") {
+						return (
+							<box key={message.id} flexDirection="row" marginBottom={1}>
+								<text fg="#7dd3fc">{"> "}</text>
+								<text>{message.content}</text>
+							</box>
+						);
+					}
+
+					if (message.role === "system") {
+						return (
+							<box key={message.id} flexDirection="row" marginBottom={1}>
+								<text attributes={TextAttributes.DIM}>{message.content}</text>
+							</box>
+						);
+					}
 
 					return (
 						<box key={message.id} flexDirection="column" marginBottom={1}>
-							<text attributes={TextAttributes.BOLD}>{label}</text>
 							<text>{message.content}</text>
 						</box>
 					);
 				})}
-				{isLoading ? (
-					<text attributes={TextAttributes.DIM}>Assistant is thinking...</text>
-				) : null}
 			</scrollbox>
 
 			<box
