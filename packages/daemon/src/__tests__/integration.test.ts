@@ -16,12 +16,28 @@ describe("Integration: server + client over Unix socket", () => {
 	let server: Server;
 	let daemon: Daemon;
 	let client: DaemonClient;
+	let registry: FakeOpencodeRegistry;
 
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(join(tmpdir(), "ralph-integration-"));
 		testSocketPath = join(tmpDir, "test.sock");
 		const store = new StateStore(join(tmpDir, "state.json"));
-		daemon = new Daemon(store, { registry: new FakeOpencodeRegistry(20) });
+		registry = new FakeOpencodeRegistry(20, {
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					models: {
+						"claude-sonnet-4-5": {
+							id: "claude-sonnet-4-5",
+							name: "Claude Sonnet 4.5",
+						},
+					},
+				},
+			],
+			connected: ["anthropic"],
+		});
+		daemon = new Daemon(store, { registry });
 		await daemon.bootstrap();
 
 		server = createServer(createConnectionHandler(daemon));
@@ -84,5 +100,19 @@ describe("Integration: server + client over Unix socket", () => {
 		await expect(client.getJob("missing")).rejects.toThrow(
 			"job missing not found",
 		);
+	});
+
+	test("can query providers through the daemon", async () => {
+		const result = await client.providerList({
+			directory: "/tmp/project-one",
+			refresh: true,
+		});
+
+		expect(result.connected).toEqual(["anthropic"]);
+		expect(result.providers).toHaveLength(1);
+		expect(result.providers[0]?.id).toBe("anthropic");
+		expect(registry.queryProviderCalls).toEqual([
+			{ directory: "/tmp/project-one", refresh: true },
+		]);
 	});
 });

@@ -12,6 +12,8 @@
 		"check:types": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@crustjs/core": "^0.0.16",
+		"@crustjs/plugins": "^0.0.21",
 		"@opencode-ai/sdk": "^1.2.10",
 		"zod": "^4.3.6"
 	},

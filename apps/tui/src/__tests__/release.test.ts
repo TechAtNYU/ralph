@@ -35,6 +35,29 @@ function installedBinPath(projectDir: string, binaryName: "ralph" | "ralphd") {
 		: join(projectDir, "node_modules", ".bin", binaryName);
 }
 
+async function waitForDaemonHealth(
+	command: string,
+	installDir: string,
+	env: NodeJS.ProcessEnv,
+	timeoutMs = 10_000,
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const proc = Bun.spawn([command, "daemon", "health"], {
+			cwd: installDir,
+			env,
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if ((await proc.exited) === 0) {
+			return;
+		}
+		await Bun.sleep(200);
+	}
+
+	throw new Error("timed out waiting for daemon health");
+}
+
 describe("release packaging", () => {
 	test("stages root and target packages with both binaries", async () => {
 		const tempDir = await mkdtemp(join(tmpdir(), "ralph-stage-"));
@@ -109,6 +132,7 @@ describe("release packaging", () => {
 			await buildBinaries({
 				targets: [currentTarget],
 				outDir: compiledDir,
+				version: "0.0.0-smoke",
 			});
 			await stageDistribution({
 				targets: [currentTarget],
@@ -160,8 +184,8 @@ describe("release packaging", () => {
 			);
 			expect(await help.exited).toBe(0);
 
-			const start = Bun.spawn(
-				[installedBinPath(installDir, "ralph"), "daemon", "start"],
+			const version = Bun.spawn(
+				[installedBinPath(installDir, "ralph"), "--version"],
 				{
 					cwd: installDir,
 					env,
@@ -169,7 +193,40 @@ describe("release packaging", () => {
 					stderr: "pipe",
 				},
 			);
-			expect(await start.exited).toBe(0);
+			expect(await version.exited).toBe(0);
+			expect(await new Response(version.stdout).text()).toContain(
+				"ralph v0.0.0-smoke",
+			);
+
+			const daemonVersion = Bun.spawn(
+				[installedBinPath(installDir, "ralphd"), "--version"],
+				{
+					cwd: installDir,
+					env,
+					stdout: "pipe",
+					stderr: "pipe",
+				},
+			);
+			expect(await daemonVersion.exited).toBe(0);
+			expect(await new Response(daemonVersion.stdout).text()).toContain(
+				"ralphd v0.0.0-smoke",
+			);
+
+			const daemonProcess = Bun.spawn(
+				[installedBinPath(installDir, "ralphd")],
+				{
+					cwd: installDir,
+					env,
+					stdout: "pipe",
+					stderr: "pipe",
+				},
+			);
+
+			await waitForDaemonHealth(
+				installedBinPath(installDir, "ralph"),
+				installDir,
+				env,
+			);
 
 			const health = Bun.spawn(
 				[installedBinPath(installDir, "ralph"), "daemon", "health"],
@@ -193,10 +250,11 @@ describe("release packaging", () => {
 				},
 			);
 			expect(await stop.exited).toBe(0);
+			expect(await daemonProcess.exited).toBe(0);
 
 			await access(installedBinPath(installDir, "ralphd"));
 		} finally {
 			await rm(tempDir, { recursive: true, force: true });
 		}
-	});
+	}, 20_000);
 });

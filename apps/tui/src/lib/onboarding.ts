@@ -8,6 +8,25 @@ type CommandResult = {
 	stderr: string;
 };
 
+export type CommandRunner = (
+	command: string,
+	args: string[],
+	options?: { timeoutMs?: number },
+) => Promise<CommandResult>;
+
+interface OnboardingDependencies {
+	commandRunner: CommandRunner;
+	daemonClient: Pick<typeof daemon, "health" | "isDaemonRunning">;
+	ensureDaemon: typeof ensureDaemonRunning;
+}
+
+export interface RunOnboardingChecksOptions {
+	autoStartDaemon?: boolean;
+	commandRunner?: CommandRunner;
+	daemonClient?: Pick<typeof daemon, "health" | "isDaemonRunning">;
+	ensureDaemon?: typeof ensureDaemonRunning;
+}
+
 async function runCommand(
 	command: string,
 	args: string[],
@@ -46,9 +65,11 @@ export interface OnboardingResult {
 	checks: OnboardingCheck[];
 }
 
-async function checkOpencodeInstalled(): Promise<OnboardingCheck> {
+async function checkOpencodeInstalled(
+	commandRunner: CommandRunner,
+): Promise<OnboardingCheck> {
 	try {
-		const result = await runCommand("opencode", ["--version"]);
+		const result = await commandRunner("opencode", ["--version"]);
 		if (result.exitCode === 0) {
 			return { label: "OpenCode installed", ok: true };
 		}
@@ -68,9 +89,11 @@ async function checkOpencodeInstalled(): Promise<OnboardingCheck> {
 	}
 }
 
-async function checkOpencodeAuth(): Promise<OnboardingCheck> {
+async function checkOpencodeAuth(
+	commandRunner: CommandRunner,
+): Promise<OnboardingCheck> {
 	try {
-		const result = await runCommand("opencode", ["auth", "list"]);
+		const result = await commandRunner("opencode", ["auth", "list"]);
 		if (result.exitCode !== 0) {
 			return {
 				label: "OpenCode authenticated",
@@ -98,11 +121,16 @@ async function checkOpencodeAuth(): Promise<OnboardingCheck> {
 	}
 }
 
-async function checkDaemonRunning(): Promise<OnboardingCheck> {
+async function checkDaemonRunning(
+	dependencies: OnboardingDependencies,
+	autoStartDaemon: boolean,
+): Promise<OnboardingCheck> {
 	try {
-		const ready = await ensureDaemonRunning();
+		const ready = autoStartDaemon
+			? await dependencies.ensureDaemon()
+			: await dependencies.daemonClient.isDaemonRunning();
 		if (ready) {
-			const health = await daemon.health();
+			const health = await dependencies.daemonClient.health();
 			return {
 				label: "Daemon running",
 				ok: true,
@@ -112,32 +140,44 @@ async function checkDaemonRunning(): Promise<OnboardingCheck> {
 		return {
 			label: "Daemon running",
 			ok: false,
-			message:
-				"ralphd could not be started. Run `ralph daemon start` manually.",
+			message: autoStartDaemon
+				? "ralphd could not be started. Run `ralph daemon start` manually."
+				: "ralphd is not running. Run `ralph daemon start` manually.",
 		};
 	} catch {
 		return {
 			label: "Daemon running",
 			ok: false,
-			message:
-				"ralphd could not be reached. Run `ralph daemon start` manually.",
+			message: autoStartDaemon
+				? "ralphd could not be reached. Run `ralph daemon start` manually."
+				: "ralphd could not be reached. Run `ralph daemon start` manually.",
 		};
 	}
 }
 
-export async function runOnboardingChecks(): Promise<OnboardingResult> {
-	const opencodeInstalled = await checkOpencodeInstalled();
+export async function runOnboardingChecks(
+	options: RunOnboardingChecksOptions = {},
+): Promise<OnboardingResult> {
+	const dependencies: OnboardingDependencies = {
+		commandRunner: options.commandRunner ?? runCommand,
+		daemonClient: options.daemonClient ?? daemon,
+		ensureDaemon: options.ensureDaemon ?? ensureDaemonRunning,
+	};
+	const autoStartDaemon = options.autoStartDaemon ?? true;
+	const opencodeInstalled = await checkOpencodeInstalled(
+		dependencies.commandRunner,
+	);
 
 	// Only check auth if opencode is installed
 	const opencodeAuth = opencodeInstalled.ok
-		? await checkOpencodeAuth()
+		? await checkOpencodeAuth(dependencies.commandRunner)
 		: {
 				label: "OpenCode authenticated",
 				ok: false,
 				message: "Skipped (opencode not installed)",
 			};
 
-	const daemonRunning = await checkDaemonRunning();
+	const daemonRunning = await checkDaemonRunning(dependencies, autoStartDaemon);
 
 	const checks = [opencodeInstalled, opencodeAuth, daemonRunning];
 	return {

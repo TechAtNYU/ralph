@@ -4,6 +4,7 @@ import type {
 	ManagedOpencodeRuntime,
 	OpencodeRuntimeManager,
 } from "../opencode";
+import type { ProviderListResult } from "../protocol";
 
 function fakeSession(overrides: Partial<Session> & { id: string }): Session {
 	return {
@@ -53,6 +54,7 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 	private sessionSequence = 0;
 	private messageSequence = 0;
 	private readonly activeByInstance = new Map<string, number>();
+	private readonly providerResult: ProviderListResult;
 	readonly maxConcurrentByInstance = new Map<string, number>();
 	readonly promptCalls: Array<{
 		instanceId: string;
@@ -60,9 +62,18 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 		prompt: string;
 	}> = [];
 	readonly abortCalls: Array<{ instanceId: string; sessionId: string }> = [];
+	readonly queryProviderCalls: Array<{
+		directory?: string;
+		refresh?: boolean;
+	}> = [];
 	globalMaxConcurrent = 0;
 
-	constructor(private readonly delayMs = 25) {}
+	constructor(
+		private readonly delayMs = 25,
+		providerResult: ProviderListResult = { providers: [], connected: [] },
+	) {
+		this.providerResult = providerResult;
+	}
 
 	async ensureStarted(instanceId: string): Promise<ManagedOpencodeRuntime> {
 		const existing = this.runtimes.get(instanceId);
@@ -124,10 +135,7 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 					},
 				},
 				provider: {
-					list: async () => ({
-						providers: [],
-						connected: [],
-					}),
+					list: async () => this.queryProviders(),
 				},
 				async ping() {
 					return true;
@@ -159,6 +167,10 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 	}
 
 	async queryProviders(_directory?: string, _refresh?: boolean) {
-		return { providers: [], connected: [] };
+		this.queryProviderCalls.push({
+			directory: _directory,
+			refresh: _refresh,
+		});
+		return structuredClone(this.providerResult);
 	}
 }
