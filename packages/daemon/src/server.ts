@@ -319,7 +319,9 @@ export class Daemon {
 		request: RequestByMethod<"provider.list">,
 	): Promise<ProviderListResult> {
 		return this.registry.queryProviders(
-			this.state.instances.map((instance: ManagedInstance) => instance.directory),
+			this.state.instances.map(
+				(instance: ManagedInstance) => instance.directory,
+			),
 			request.params.directory,
 			request.params.refresh,
 		);
