@@ -390,22 +390,13 @@ function Dashboard({
 			return;
 		}
 
-		if (key.name === "right" || key.name === "l") {
-			if (focused.kind === "instance" && !expanded.has(focused.instanceId)) {
-				void toggleExpand(focused.instanceId, true);
-			}
-			return;
-		}
-
-		if (key.name === "left" || key.name === "h") {
+		if (key.name === "space") {
 			if (focused.kind === "session") {
-				// First press: move focus up to parent instance.
 				setFocused({ kind: "instance", instanceId: focused.instanceId });
+				void toggleExpand(focused.instanceId, false);
 				return;
 			}
-			if (focused.kind === "instance" && expanded.has(focused.instanceId)) {
-				void toggleExpand(focused.instanceId, false);
-			}
+			void toggleExpand(focused.instanceId, !expanded.has(focused.instanceId));
 			return;
 		}
 
@@ -592,7 +583,7 @@ function Dashboard({
 			<box flexDirection="column" marginTop={1}>
 				<text attributes={TextAttributes.DIM}>
 					{error ??
-						"l/h expand/collapse  j/k move  enter: open  m: model  r: refresh  q: quit"}
+						"space: expand/collapse  j/k: move  enter: open  m: model  r: refresh  q: quit"}
 				</text>
 			</box>
 		</box>
