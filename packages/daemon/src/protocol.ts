@@ -73,11 +73,10 @@ const ManagedInstance = z.strictObject({
 export type ManagedInstance = z.infer<typeof ManagedInstance>;
 
 /** A job that has been submitted to the daemon for execution. */
-const DaemonJob = z.strictObject({
+export const DaemonJob = z.strictObject({
 	id: z.string().min(1),
 	instanceId: z.string().min(1),
 	sessionId: z.string().min(1).optional(),
-	session: JobSession,
 	task: JobTask,
 	state: JobState,
 	createdAt: IsoDateTime,
@@ -595,16 +594,6 @@ export const ResponseMessage = z.union([
 	ErrorResponse,
 ]);
 export type ResponseMessage = z.infer<typeof ResponseMessage>;
-
-// ---------------------------------------------------------------------------
-// Daemon persisted state
-// ---------------------------------------------------------------------------
-
-export const DaemonState = z.strictObject({
-	instances: z.array(ManagedInstance),
-	jobs: z.array(DaemonJob),
-});
-export type DaemonState = z.infer<typeof DaemonState>;
 
 // ---------------------------------------------------------------------------
 // Utility types — type-level helpers for method-based dispatch

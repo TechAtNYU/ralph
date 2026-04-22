@@ -6,7 +6,8 @@ export const DEFAULT_DAEMON_MAX_CONCURRENCY = 4;
 export interface DaemonPaths {
 	ralphHome: string;
 	socketPath: string;
-	statePath: string;
+	/** SQLite database file for daemon persisted state (instances, sessions, jobs). */
+	databasePath: string;
 }
 
 export interface DaemonRuntimeEnv extends DaemonPaths {
@@ -52,7 +53,7 @@ export function resolveDaemonPaths(
 	return {
 		ralphHome,
 		socketPath: join(ralphHome, "ralphd.sock"),
-		statePath: join(ralphHome, "state.json"),
+		databasePath: join(ralphHome, "state.sqlite"),
 	};
 }
 
@@ -81,4 +82,4 @@ const defaultPaths = resolveDaemonPaths();
 
 export const RALPH_HOME = defaultPaths.ralphHome;
 export const SOCKET_PATH = defaultPaths.socketPath;
-export const STATE_PATH = defaultPaths.statePath;
+export const DATABASE_PATH = defaultPaths.databasePath;
