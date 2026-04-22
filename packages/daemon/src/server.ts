@@ -14,6 +14,7 @@ import {
 import {
 	type CancelResult,
 	type DaemonJob,
+	type DaemonSession,
 	type DaemonState,
 	DaemonState as DaemonStateSchema,
 	type ErrorResponse,
@@ -35,6 +36,8 @@ import {
 	type ResponseError,
 	type ResponseMessage,
 	type ResultByMethod,
+	type SessionGetResult,
+	type SessionListResult,
 	type ShutdownResult,
 	type StreamAckResult,
 	type SubmitResult,
@@ -61,6 +64,22 @@ function extractText(parts: Part[]): string {
 		.trim();
 }
 
+const MAX_SESSION_TITLE_LENGTH = 80;
+
+function deriveSessionTitle(job: DaemonJob): string {
+	if (job.session.type === "new" && job.session.title) {
+		return job.session.title;
+	}
+	if (job.task.type === "prompt") {
+		const text = job.task.prompt.trim();
+		if (text.length > MAX_SESSION_TITLE_LENGTH) {
+			return `${text.slice(0, MAX_SESSION_TITLE_LENGTH - 3)}...`;
+		}
+		return text;
+	}
+	return "Untitled";
+}
+
 function normalizeErrorMessage(error: unknown): string {
 	if (error instanceof Error) {
 		return error.message;
@@ -85,6 +104,7 @@ export class Daemon {
 	private state: DaemonState = structuredClone(
 		DaemonStateSchema.parse({
 			instances: [],
+			sessions: [],
 			jobs: [],
 		}),
 	);
@@ -159,6 +179,10 @@ export class Daemon {
 					return this.success(raw, await this.handleInstanceRemove(raw));
 				case "provider.list":
 					return this.success(raw, await this.handleProviderList(raw));
+				case "session.list":
+					return this.success(raw, this.handleSessionList(raw));
+				case "session.get":
+					return this.success(raw, this.handleSessionGet(raw));
 				case "job.submit":
 					return this.success(raw, await this.handleJobSubmit(raw));
 				case "job.list":
@@ -311,6 +335,7 @@ export class Daemon {
 		await this.registry.stop(instance.id);
 		this.queues.delete(instance.id);
 		this.state = this.store.removeInstance(this.state, instance.id);
+		this.state = this.store.removeSessionsForInstance(this.state, instance.id);
 		await this.store.save(this.state);
 		return { instance };
 	}
@@ -325,6 +350,24 @@ export class Daemon {
 			request.params.directory,
 			request.params.refresh,
 		);
+	}
+
+	private handleSessionList(
+		request: RequestByMethod<"session.list">,
+	): SessionListResult {
+		return {
+			sessions: this.store.listSessions(this.state, {
+				instanceId: request.params.instanceId,
+			}),
+		};
+	}
+
+	private handleSessionGet(
+		request: RequestByMethod<"session.get">,
+	): SessionGetResult {
+		return {
+			session: this.store.assertSession(this.state, request.params.sessionId),
+		};
 	}
 
 	private async handleJobSubmit(
@@ -715,11 +758,22 @@ export class Daemon {
 			return job.sessionId;
 		}
 
+		const title = deriveSessionTitle(job);
 		const session = await client.session.create({
 			directory: instance.directory,
-			title: job.session.title,
+			title,
 		});
 		job.sessionId = session.id;
+
+		const now = new Date().toISOString();
+		const daemonSession: DaemonSession = {
+			id: session.id,
+			instanceId: instance.id,
+			title,
+			createdAt: now,
+			updatedAt: now,
+		};
+		this.state = this.store.upsertSession(this.state, daemonSession);
 		this.state = this.store.upsertJob(this.state, job);
 		await this.store.save(this.state);
 		return session.id;
