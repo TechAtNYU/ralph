@@ -50,7 +50,7 @@ export interface ProviderListResult {
 export interface OpencodeRuntimeClient {
 	session: OpencodeSessionClient;
 	instance: {
-		dispose(): Promise<unknown>;
+		dispose(parameters?: { directory?: string }): Promise<unknown>;
 	};
 	provider: {
 		list(parameters?: { directory?: string }): Promise<ProviderListResult>;
@@ -69,33 +69,42 @@ export interface ManagedOpencodeRuntime {
 export type OpencodeRuntimeEvent = OpencodeEvent;
 
 export interface OpencodeRuntimeManager {
-	ensureStarted(instanceId: string): Promise<ManagedOpencodeRuntime>;
+	ensureStarted(
+		instanceId: string,
+		directory: string,
+	): Promise<ManagedOpencodeRuntime>;
 	get(instanceId: string): ManagedOpencodeRuntime | undefined;
 	isRunning(instanceId: string): boolean;
 	stop(instanceId: string): Promise<void>;
 	stopAll(): Promise<void>;
-	/** Register the handler that receives every event surfaced by managed
-	 * runtimes. Called by the Daemon during construction so that wiring is
+	/** Register the handler that receives every event surfaced by the shared
+	 * runtime. Called by the Daemon during construction so that wiring is
 	 * uniform regardless of whether the registry was injected or default. */
 	setOnEvent(
 		handler: (instanceId: string, event: OpencodeRuntimeEvent) => void,
 	): void;
 	queryProviders(
+		directories: string[],
 		directory?: string,
 		refresh?: boolean,
 	): Promise<ProviderListResult>;
 }
 
-interface RuntimeEntry {
-	runtime?: ManagedOpencodeRuntime;
-	starting?: Promise<ManagedOpencodeRuntime>;
+interface SharedRuntime extends ManagedOpencodeRuntime {
+	rawEventSubscribe(parameters: {
+		directory: string;
+	}): Promise<{ stream: AsyncIterable<OpencodeRuntimeEvent> }>;
 }
 
-const SYSTEM_INSTANCE_ID = "__system__";
+interface InstanceSubscription {
+	directory: string;
+	cancel(): void;
+}
 
 export class OpencodeRegistry implements OpencodeRuntimeManager {
-	private readonly runtimes = new Map<string, RuntimeEntry>();
-	private readonly eventSubscriptions = new Map<string, { cancel(): void }>();
+	private shared?: SharedRuntime;
+	private sharedStarting?: Promise<SharedRuntime>;
+	private readonly subscriptions = new Map<string, InstanceSubscription>();
 	private onEvent?: (instanceId: string, event: OpencodeRuntimeEvent) => void;
 
 	setOnEvent(
@@ -104,25 +113,38 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 		this.onEvent = handler;
 	}
 
-	async ensureStarted(instanceId: string): Promise<ManagedOpencodeRuntime> {
-		const entry = this.runtimes.get(instanceId);
-		if (entry?.runtime) {
-			return entry.runtime;
-		}
+	async ensureStarted(
+		instanceId: string,
+		directory: string,
+	): Promise<ManagedOpencodeRuntime> {
+		const runtime = await this.ensureSharedRuntime();
 
-		if (entry?.starting) {
-			return entry.starting;
-		}
-
-		const starting = createOpencode().then(async ({ client, server }) => {
-			const events = await client.event.subscribe();
+		const existing = this.subscriptions.get(instanceId);
+		if (!existing) {
+			const events = await runtime.rawEventSubscribe({ directory });
 			const subscription = this.consumeEvents(instanceId, events);
-			this.eventSubscriptions.set(instanceId, subscription);
+			this.subscriptions.set(instanceId, {
+				directory,
+				cancel: subscription.cancel,
+			});
+		}
 
-			const runtime: ManagedOpencodeRuntime = {
+		return runtime;
+	}
+
+	private async ensureSharedRuntime(): Promise<SharedRuntime> {
+		if (this.shared) {
+			return this.shared;
+		}
+		if (this.sharedStarting) {
+			return this.sharedStarting;
+		}
+
+		const starting = createOpencode({ port: 0 }).then(({ client, server }) => {
+			const runtime: SharedRuntime = {
 				client: {
 					instance: {
-						dispose: () => client.instance.dispose(),
+						dispose: (parameters) => client.instance.dispose(parameters),
 					},
 					session: {
 						create: async (parameters) => {
@@ -184,17 +206,19 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 					},
 				},
 				server,
+				rawEventSubscribe: async (parameters) => {
+					return client.event.subscribe(parameters);
+				},
 			};
-			this.runtimes.set(instanceId, { runtime });
+			this.shared = runtime;
 			return runtime;
 		});
 
-		this.runtimes.set(instanceId, { starting });
+		this.sharedStarting = starting;
 		try {
 			return await starting;
-		} catch (error) {
-			this.runtimes.delete(instanceId);
-			throw error;
+		} finally {
+			this.sharedStarting = undefined;
 		}
 	}
 
@@ -223,84 +247,52 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 	}
 
 	get(instanceId: string): ManagedOpencodeRuntime | undefined {
-		return this.runtimes.get(instanceId)?.runtime;
+		return this.subscriptions.has(instanceId) ? this.shared : undefined;
 	}
 
 	isRunning(instanceId: string): boolean {
-		return this.runtimes.has(instanceId) && Boolean(this.get(instanceId));
+		return this.subscriptions.has(instanceId);
 	}
 
 	async stop(instanceId: string): Promise<void> {
-		this.eventSubscriptions.get(instanceId)?.cancel();
-		this.eventSubscriptions.delete(instanceId);
-
-		const entry = this.runtimes.get(instanceId);
-		if (!entry) {
+		const subscription = this.subscriptions.get(instanceId);
+		if (!subscription) {
 			return;
 		}
-
-		try {
-			const runtime =
-				entry.runtime ?? (entry.starting ? await entry.starting : undefined);
-			await runtime?.client.instance.dispose();
-			runtime?.server.close();
-		} finally {
-			this.runtimes.delete(instanceId);
-		}
+		subscription.cancel();
+		this.subscriptions.delete(instanceId);
 	}
 
 	async stopAll(): Promise<void> {
-		await Promise.allSettled(
-			[...this.runtimes.keys()].map((instanceId) => this.stop(instanceId)),
-		);
-	}
+		for (const subscription of this.subscriptions.values()) {
+			subscription.cancel();
+		}
+		this.subscriptions.clear();
 
-	/**
-	 * Get or create a long-lived system runtime for provider queries and other
-	 * lightweight operations that don't belong to a user-created instance.
-	 */
-	private ensureSystemRuntime(): Promise<ManagedOpencodeRuntime> {
-		return this.ensureStarted(SYSTEM_INSTANCE_ID);
-	}
-
-	private async healthCheck(runtime: ManagedOpencodeRuntime): Promise<boolean> {
-		return runtime.client.ping();
+		const runtime = this.shared;
+		this.shared = undefined;
+		if (runtime) {
+			try {
+				runtime.server.close();
+			} catch {
+				// best-effort shutdown
+			}
+		}
 	}
 
 	async queryProviders(
+		directories: string[],
 		directory?: string,
 		refresh?: boolean,
 	): Promise<ProviderListResult> {
-		// When refresh is requested, dispose the runtime's internal instance so
-		// OpenCode re-reads auth.json and rebuilds its provider cache.
+		const runtime = await this.ensureSharedRuntime();
 		if (refresh) {
-			const runtime = await this.ensureSystemRuntime();
-			try {
-				await runtime.client.instance.dispose();
-			} catch {
-				// dispose may fail if the instance was already gone — ignore
-			}
-			return runtime.client.provider.list({ directory });
+			await Promise.allSettled(
+				directories.map((dir) =>
+					runtime.client.instance.dispose({ directory: dir }),
+				),
+			);
 		}
-
-		// Prefer an existing user runtime if one is available
-		for (const [id, entry] of this.runtimes.entries()) {
-			if (id !== SYSTEM_INSTANCE_ID && entry.runtime) {
-				try {
-					return await entry.runtime.client.provider.list({ directory });
-				} catch {}
-			}
-		}
-
-		// Fall back to the long-lived system runtime
-		let runtime = await this.ensureSystemRuntime();
-
-		// Health check — restart if the system instance died
-		if (!(await this.healthCheck(runtime))) {
-			this.runtimes.delete(SYSTEM_INSTANCE_ID);
-			runtime = await this.ensureSystemRuntime();
-		}
-
 		return runtime.client.provider.list({ directory });
 	}
 }
