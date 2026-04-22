@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm, unlink } from "node:fs/promises";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +10,43 @@ import { createConnectionHandler, Daemon } from "../server";
 import { StateStore } from "../store";
 import { FakeOpencodeRegistry } from "./helpers";
 
-describe("Integration: server + client over Unix socket", () => {
+/** False in restricted environments (e.g. some sandboxes) where binding a Unix socket returns EPERM. */
+async function canBindUnixSocket(): Promise<boolean> {
+	let probeDir: string | undefined;
+	try {
+		probeDir = await mkdtemp(join(tmpdir(), "ralph-unix-probe-"));
+		const path = join(probeDir, "p.sock");
+		const srv = createServer();
+		await new Promise<void>((resolve, reject) => {
+			const onError = (err: NodeJS.ErrnoException) => reject(err);
+			srv.once("error", onError);
+			try {
+				srv.listen(path, () => {
+					srv.removeListener("error", onError);
+					srv.close((closeErr) => {
+						if (closeErr) reject(closeErr);
+						else resolve();
+					});
+				});
+			} catch (err) {
+				reject(err);
+			}
+		});
+		return true;
+	} catch {
+		return false;
+	} finally {
+		if (probeDir) {
+			await rm(probeDir, { recursive: true, force: true }).catch(() => {});
+		}
+	}
+}
+
+const unixSocketAvailable = await canBindUnixSocket();
+
+const integrationDescribe = unixSocketAvailable ? describe : describe.skip;
+
+integrationDescribe("Integration: server + client over Unix socket", () => {
 	let tmpDir: string;
 	let testSocketPath: string;
 	let server: Server;
@@ -21,7 +57,12 @@ describe("Integration: server + client over Unix socket", () => {
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(join(tmpdir(), "ralph-integration-"));
 		testSocketPath = join(tmpDir, "test.sock");
-		const store = new StateStore(join(tmpDir, "state.json"));
+		try {
+			await unlink(testSocketPath);
+		} catch {
+			// ignore
+		}
+		const store = new StateStore(join(tmpDir, "state.sqlite"));
 		registry = new FakeOpencodeRegistry(20);
 		daemon = new Daemon(store, { registry });
 		await daemon.bootstrap();
@@ -29,16 +70,31 @@ describe("Integration: server + client over Unix socket", () => {
 		server = createServer(createConnectionHandler(daemon));
 		client = new DaemonClient(testSocketPath);
 
-		await new Promise<void>((resolve) => {
-			server.listen(testSocketPath, async () => {
-				await chmod(testSocketPath, 0o600);
-				resolve();
-			});
+		await new Promise<void>((resolve, reject) => {
+			const onError = (err: NodeJS.ErrnoException) => {
+				reject(err);
+			};
+			server.once("error", onError);
+			try {
+				server.listen(testSocketPath, async () => {
+					try {
+						await chmod(testSocketPath, 0o600);
+						server.removeListener("error", onError);
+						resolve();
+					} catch (err) {
+						server.removeListener("error", onError);
+						reject(err);
+					}
+				});
+			} catch (err) {
+				server.removeListener("error", onError);
+				reject(err);
+			}
 		});
 	});
 
 	afterEach(async () => {
-		server.close();
+		server?.close();
 		await daemon.shutdown();
 		await rm(tmpDir, { recursive: true, force: true });
 	});
@@ -119,7 +175,6 @@ describe("Integration: server + client over Unix socket", () => {
 	});
 
 	test("client.streamJob returns immediately for an already-terminal job", async () => {
-		// No streaming deltas — fake completes quickly with default delay.
 		const created = await client.createInstance({
 			name: "fast-instance",
 			directory: "/tmp/project-fast",
@@ -130,7 +185,6 @@ describe("Integration: server + client over Unix socket", () => {
 			task: { type: "prompt", prompt: "fast" },
 		});
 
-		// Wait for the job to finish.
 		await Bun.sleep(100);
 
 		const events: JobStreamEvent[] = [];
@@ -138,8 +192,6 @@ describe("Integration: server + client over Unix socket", () => {
 			events.push(event);
 		}
 
-		// Terminal jobs short-circuit: just a done event, no snapshot or
-		// deltas.
 		expect(events).toHaveLength(1);
 		expect(events[0]?.type).toBe("done");
 	});

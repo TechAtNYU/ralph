@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { DaemonState, RequestMessage, ResponseMessage } from "../protocol";
+import { RequestMessage, ResponseMessage } from "../protocol";
 
 describe("protocol schemas", () => {
 	test("parses a valid submit request", () => {
@@ -61,14 +61,5 @@ describe("protocol schemas", () => {
 		});
 
 		expect(parsed.success).toBe(false);
-	});
-
-	test("parses daemon state", () => {
-		const parsed = DaemonState.safeParse({
-			instances: [],
-			jobs: [],
-		});
-
-		expect(parsed.success).toBe(true);
 	});
 });

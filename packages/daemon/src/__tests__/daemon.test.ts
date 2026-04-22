@@ -47,7 +47,7 @@ describe("Daemon", () => {
 
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(join(tmpdir(), "ralph-daemon-test-"));
-		store = new StateStore(join(tmpDir, "state.json"));
+		store = new StateStore(join(tmpDir, "state.sqlite"));
 		registry = new FakeOpencodeRegistry(40);
 		daemon = new Daemon(store, { registry });
 		await daemon.bootstrap();
@@ -266,32 +266,28 @@ describe("Daemon", () => {
 	});
 
 	test("requeues running jobs after restart", async () => {
-		await store.save({
-			instances: [
-				{
-					id: "instance-1",
-					name: "One",
-					directory: "/tmp/project-one",
-					status: "running",
-					maxConcurrency: 1,
-					createdAt: "2026-01-01T00:00:00.000Z",
-					updatedAt: "2026-01-01T00:00:00.000Z",
-				},
-			],
-			jobs: [
-				{
-					id: "job-1",
-					instanceId: "instance-1",
-					session: { type: "new" },
-					task: { type: "prompt", prompt: "recover" },
-					state: "running",
-					createdAt: "2026-01-01T00:00:00.000Z",
-					updatedAt: "2026-01-01T00:00:00.000Z",
-				},
-			],
-		});
+		// Shut down the beforeEach daemon so we can simulate a crashed state
+		// by writing directly to the SQLite file.
+		await daemon.shutdown();
 
-		const nextDaemon = new Daemon(store, {
+		const seedStore = new StateStore(join(tmpDir, "state.sqlite"));
+		await seedStore.open();
+		const instance = seedStore.createInstance({
+			name: "One",
+			directory: "/tmp/project-one",
+			maxConcurrency: 1,
+		});
+		seedStore.setInstanceStatus(instance.id, "running");
+		const job = seedStore.createJob({
+			instanceId: instance.id,
+			session: { type: "new" },
+			task: { type: "prompt", prompt: "recover" },
+		});
+		seedStore.markJobRunning(job.id);
+		seedStore.close();
+
+		const nextStore = new StateStore(join(tmpDir, "state.sqlite"));
+		const nextDaemon = new Daemon(nextStore, {
 			registry: new FakeOpencodeRegistry(10),
 		});
 		await nextDaemon.bootstrap();
@@ -299,7 +295,7 @@ describe("Daemon", () => {
 			req({
 				id: "job-get",
 				method: "job.get",
-				params: { jobId: "job-1" },
+				params: { jobId: job.id },
 			}),
 		);
 		expect(["queued", "running", "succeeded"]).toContain(
@@ -317,7 +313,7 @@ describe("Daemon streaming", () => {
 
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(join(tmpdir(), "ralph-daemon-stream-"));
-		store = new StateStore(join(tmpDir, "state.json"));
+		store = new StateStore(join(tmpDir, "state.sqlite"));
 		registry = new FakeOpencodeRegistry(40);
 		daemon = new Daemon(store, { registry });
 		await daemon.bootstrap();
