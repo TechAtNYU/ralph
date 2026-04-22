@@ -66,6 +66,7 @@ describe("protocol schemas", () => {
 	test("parses daemon state", () => {
 		const parsed = DaemonState.safeParse({
 			instances: [],
+			sessions: [],
 			jobs: [],
 		});
 

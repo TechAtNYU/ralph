@@ -4,6 +4,7 @@ import type { z } from "zod";
 
 import {
 	type DaemonJob,
+	type DaemonSession,
 	type DaemonState,
 	DaemonState as DaemonStateSchema,
 	type ManagedInstance,
@@ -12,6 +13,7 @@ import {
 
 const EMPTY_STATE: DaemonState = {
 	instances: [],
+	sessions: [],
 	jobs: [],
 };
 
@@ -37,6 +39,16 @@ export class StateStore {
 		try {
 			const raw = await readFile(this.statePath, "utf8");
 			const parsed = JSON.parse(raw) as unknown;
+
+			// Migrate legacy state files that predate the sessions array.
+			if (
+				typeof parsed === "object" &&
+				parsed !== null &&
+				!("sessions" in parsed)
+			) {
+				(parsed as Record<string, unknown>).sessions = [];
+			}
+
 			const current = DaemonStateSchema.safeParse(parsed);
 			if (current.success) {
 				return current.data;
@@ -90,10 +102,17 @@ export class StateStore {
 
 	listJobs(
 		state: DaemonState,
-		filter: { instanceId?: string; state?: DaemonJob["state"] },
+		filter: {
+			instanceId?: string;
+			sessionId?: string;
+			state?: DaemonJob["state"];
+		},
 	): DaemonJob[] {
 		return state.jobs.filter((job: DaemonJob) => {
 			if (filter.instanceId && job.instanceId !== filter.instanceId) {
+				return false;
+			}
+			if (filter.sessionId && job.sessionId !== filter.sessionId) {
 				return false;
 			}
 			if (filter.state && job.state !== filter.state) {
@@ -155,6 +174,52 @@ export class StateStore {
 			...state,
 			instances: state.instances.filter(
 				(item: ManagedInstance) => item.id !== instanceId,
+			),
+		};
+	}
+
+	// Session operations
+
+	upsertSession(state: DaemonState, session: DaemonSession): DaemonState {
+		const sessions = state.sessions.filter(
+			(item: DaemonSession) => item.id !== session.id,
+		);
+		sessions.push(session);
+		sessions.sort((a: DaemonSession, b: DaemonSession) =>
+			a.createdAt < b.createdAt ? 1 : -1,
+		);
+		return { ...state, sessions };
+	}
+
+	getSession(state: DaemonState, sessionId: string): DaemonSession | undefined {
+		return state.sessions.find((item: DaemonSession) => item.id === sessionId);
+	}
+
+	listSessions(
+		state: DaemonState,
+		filter: { instanceId: string },
+	): DaemonSession[] {
+		return state.sessions.filter(
+			(item: DaemonSession) => item.instanceId === filter.instanceId,
+		);
+	}
+
+	assertSession(state: DaemonState, sessionId: string): DaemonSession {
+		const session = this.getSession(state, sessionId);
+		if (!session) {
+			throw new StoreError("not_found", `session ${sessionId} not found`);
+		}
+		return session;
+	}
+
+	removeSessionsForInstance(
+		state: DaemonState,
+		instanceId: string,
+	): DaemonState {
+		return {
+			...state,
+			sessions: state.sessions.filter(
+				(item: DaemonSession) => item.instanceId !== instanceId,
 			),
 		};
 	}
