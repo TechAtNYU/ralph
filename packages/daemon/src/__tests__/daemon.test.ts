@@ -451,6 +451,85 @@ describe("Daemon streaming", () => {
 		expect(job.outputText).toBe("reply:plain");
 	});
 
+	test("two instances stream independently without cross-leak", async () => {
+		registry.streamingDeltas = ["x", "y", "z"];
+		registry.deltaIntervalMs = 20;
+
+		const alpha = await daemon.handleRequest(
+			req({
+				id: "instance-alpha",
+				method: "instance.create",
+				params: { name: "Alpha", directory: "/tmp/alpha" },
+			}),
+		);
+		const beta = await daemon.handleRequest(
+			req({
+				id: "instance-beta",
+				method: "instance.create",
+				params: { name: "Beta", directory: "/tmp/beta" },
+			}),
+		);
+		const alphaInstance = expectSuccess(alpha, "instance.create").instance;
+		const betaInstance = expectSuccess(beta, "instance.create").instance;
+
+		const submitAlpha = await daemon.handleRequest(
+			req({
+				id: "submit-alpha",
+				method: "job.submit",
+				params: {
+					instanceId: alphaInstance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "alpha-prompt" },
+				},
+			}),
+		);
+		const submitBeta = await daemon.handleRequest(
+			req({
+				id: "submit-beta",
+				method: "job.submit",
+				params: {
+					instanceId: betaInstance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "beta-prompt" },
+				},
+			}),
+		);
+		const alphaJobId = expectSuccess(submitAlpha, "job.submit").job.id;
+		const betaJobId = expectSuccess(submitBeta, "job.submit").job.id;
+
+		const alphaEvents: Array<{ type: string }> = [];
+		const betaEvents: Array<{ type: string }> = [];
+		const unsubA = daemon.subscribeJob(alphaJobId, (e) => alphaEvents.push(e));
+		const unsubB = daemon.subscribeJob(betaJobId, (e) => betaEvents.push(e));
+
+		await Bun.sleep(200);
+		unsubA();
+		unsubB();
+
+		const alphaJob = expectSuccess(
+			await daemon.handleRequest(
+				req({ id: "g-a", method: "job.get", params: { jobId: alphaJobId } }),
+			),
+			"job.get",
+		).job;
+		const betaJob = expectSuccess(
+			await daemon.handleRequest(
+				req({ id: "g-b", method: "job.get", params: { jobId: betaJobId } }),
+			),
+			"job.get",
+		).job;
+
+		expect(alphaJob.outputText).toBe("xyz");
+		expect(betaJob.outputText).toBe("xyz");
+		expect(alphaEvents.some((e) => e.type === "delta")).toBe(true);
+		expect(betaEvents.some((e) => e.type === "delta")).toBe(true);
+		expect(alphaEvents[alphaEvents.length - 1]?.type).toBe("done");
+		expect(betaEvents[betaEvents.length - 1]?.type).toBe("done");
+
+		expect(registry.directoriesStarted).toContain("/tmp/alpha");
+		expect(registry.directoriesStarted).toContain("/tmp/beta");
+	});
+
 	test("late subscriber gets snapshot of accumulated text and continues without duplicates", async () => {
 		registry.streamingDeltas = ["alpha ", "beta ", "gamma ", "delta"];
 		registry.deltaIntervalMs = 25;
