@@ -215,11 +215,7 @@ function Dashboard({
 
 				// Resolve next focus against the fresh row list.
 				const candidate = nextFocus ?? focused;
-				const rows = flattenRows(
-					instances,
-					new Set(expandedIds),
-					nextSessions,
-				);
+				const rows = flattenRows(instances, new Set(expandedIds), nextSessions);
 				let resolvedFocus: Focus | undefined;
 				if (candidate) {
 					const idx = findFocusIndex(rows, candidate);
@@ -269,10 +265,9 @@ function Dashboard({
 		[expanded, focused],
 	);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: initial load only; subsequent refreshes are user-driven
 	useEffect(() => {
 		void refresh();
-		// Initial load only; subsequent refreshes are user-driven.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	const rows: Row[] = data
@@ -526,11 +521,7 @@ function Dashboard({
 								const isExpanded = expanded.has(row.instance.id);
 								const hasKnownSessions =
 									sessionsByInstance[row.instance.id] !== undefined;
-								const marker = isExpanded
-									? "▾"
-									: hasKnownSessions
-										? "▸"
-										: "▸";
+								const marker = isExpanded ? "▾" : hasKnownSessions ? "▸" : "▸";
 								return (
 									<text key={rowKey(row)} attributes={attrs}>
 										{`${chevron} ${marker} ${row.instance.name} [${row.instance.status}] ${basename(row.instance.directory)} (${counts.running}r/${counts.queued}q)`}

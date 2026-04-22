@@ -1,8 +1,8 @@
 import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { resolveDaemonPaths } from "@techatnyu/ralphd";
 import type { DaemonJob, ManagedInstance } from "@techatnyu/ralphd";
+import { resolveDaemonPaths } from "@techatnyu/ralphd";
 
 const SPEC_FILENAME = "SPEC.md";
 const PRD_FILENAME = "prd.json";
@@ -90,8 +90,7 @@ export async function listSessions(
 	instanceId: string,
 	opts: ListSessionsOptions = {},
 ): Promise<SessionSummary[]> {
-	const ralphHome =
-		opts.ralphHome ?? resolveDaemonPaths(process.env).ralphHome;
+	const ralphHome = opts.ralphHome ?? resolveDaemonPaths(process.env).ralphHome;
 	const adapter = opts.progressAdapter ?? prdJsonProgressAdapter;
 	const instanceDir = join(ralphHome, "sessions", instanceId);
 
