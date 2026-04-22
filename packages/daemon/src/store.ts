@@ -58,6 +58,18 @@ interface JobRow {
 	remote_session_id: string | null;
 }
 
+interface SessionRefRow {
+	kind: "new" | "existing";
+	title: string | null;
+	remote_session_id: string | null;
+}
+
+export interface JobSessionRef {
+	kind: "new" | "existing";
+	title?: string;
+	remoteSessionId?: string;
+}
+
 function rowToInstance(row: InstanceRow): ManagedInstance {
 	const base: ManagedInstance = {
 		id: row.id,
@@ -140,6 +152,7 @@ export class StateStore {
 					{ id: string; remote_session_id: string | null },
 					[string, string]
 				>;
+				getSessionForJob: Statement<SessionRefRow, [string]>;
 				assignRemoteSessionToJob: Statement;
 
 				listAllJobs: Statement<JobRow>;
@@ -210,6 +223,12 @@ export class StateStore {
 			>(
 				`SELECT id, remote_session_id FROM sessions
 				 WHERE instance_id = ? AND remote_session_id = ?`,
+			),
+			getSessionForJob: db.query<SessionRefRow, [string]>(
+				`SELECT s.kind, s.title, s.remote_session_id
+				 FROM sessions s
+				 JOIN jobs j ON j.session_id = s.id
+				 WHERE j.id = ?`,
 			),
 			assignRemoteSessionToJob: db.query(
 				`UPDATE sessions
@@ -464,6 +483,20 @@ export class StateStore {
 			$remote_session_id: remoteSessionId,
 			$updated_at: new Date().toISOString(),
 		});
+	}
+
+	getSessionForJob(jobId: string): JobSessionRef {
+		const row = this.s().getSessionForJob.get(jobId);
+		if (!row) {
+			throw new StoreError("not_found", `session for job ${jobId} not found`);
+		}
+		return {
+			kind: row.kind,
+			...(row.title ? { title: row.title } : {}),
+			...(row.remote_session_id
+				? { remoteSessionId: row.remote_session_id }
+				: {}),
+		};
 	}
 
 	// --------------------------------------------------------------------

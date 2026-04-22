@@ -103,6 +103,42 @@ describe("Daemon", () => {
 		expect(result.job.instanceId).toBe(instance.instance.id);
 	});
 
+	test("forwards new session titles when creating remote sessions", async () => {
+		const created = await daemon.handleRequest(
+			req({
+				id: "instance-create",
+				method: "instance.create",
+				params: {
+					name: "One",
+					directory: "/tmp/project-one",
+				},
+			}),
+		);
+		const instance = expectSuccess(created, "instance.create");
+
+		await daemon.handleRequest(
+			req({
+				id: "job-submit",
+				method: "job.submit",
+				params: {
+					instanceId: instance.instance.id,
+					session: { type: "new", title: "Sprint Planning" },
+					task: {
+						type: "prompt",
+						prompt: "hello world",
+					},
+				},
+			}),
+		);
+
+		await Bun.sleep(80);
+		expect(registry.sessionCreateCalls).toContainEqual({
+			instanceId: instance.instance.id,
+			directory: "/tmp/project-one",
+			title: "Sprint Planning",
+		});
+	});
+
 	test("rejects submit with nonexistent instance", async () => {
 		const submit = await daemon.handleRequest(
 			req({

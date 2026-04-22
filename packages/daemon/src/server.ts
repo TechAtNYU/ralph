@@ -599,11 +599,14 @@ export class Daemon {
 		job: DaemonJob,
 	): Promise<string> {
 		if (job.sessionId) return job.sessionId;
+		const sessionRef = this.store.getSessionForJob(job.id);
+		if (sessionRef.remoteSessionId) return sessionRef.remoteSessionId;
 
 		// No remote id yet — this is a `{type: 'new'}` submission. The
 		// sessions row was created at submit time; fill in its remote id.
 		const session = await client.session.create({
 			directory: instance.directory,
+			title: sessionRef.kind === "new" ? sessionRef.title : undefined,
 		});
 		this.store.assignRemoteSessionToJob(job.id, session.id);
 		return session.id;
