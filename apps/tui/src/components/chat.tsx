@@ -44,11 +44,24 @@ function messagesFromJob(job: DaemonJob): ChatMessage[] {
 interface ChatProps {
 	instanceId: string;
 	instanceName: string;
+	/**
+	 * Ralph session id (directory under RALPH_HOME/sessions/<instanceId>/)
+	 * when chat is opened from an expanded session row. Currently plumbed
+	 * through but not yet consumed — will be used once a Ralph-session ↔
+	 * OpenCode-session mapping is persisted.
+	 */
+	ralphSessionId?: string;
 	onBack(): void;
 	onQuit(): void;
 }
 
-export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
+export function Chat({
+	instanceId,
+	instanceName,
+	ralphSessionId: _ralphSessionId,
+	onBack,
+	onQuit,
+}: ChatProps) {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [inputValue, setInputValue] = useState("");
 	const [isLoading, setIsLoading] = useState(false);

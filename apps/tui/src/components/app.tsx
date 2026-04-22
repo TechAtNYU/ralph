@@ -8,12 +8,28 @@ import type {
 } from "@techatnyu/ralphd";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useState } from "react";
+import {
+	filterJobsForSession,
+	flattenRows,
+	listSessions,
+	type Row,
+	type SessionSummary,
+} from "../lib/sessions";
 import { ralphStore, setModelAndRecent } from "../lib/store";
 import { Chat } from "./chat";
 
 type View =
 	| { type: "dashboard" }
-	| { type: "chat"; instanceId: string; instanceName: string };
+	| {
+			type: "chat";
+			instanceId: string;
+			instanceName: string;
+			ralphSessionId?: string;
+	  };
+
+type Focus =
+	| { kind: "instance"; instanceId: string }
+	| { kind: "session"; instanceId: string; sessionId: string };
 
 interface DashboardData {
 	health: HealthResult;
@@ -82,13 +98,6 @@ interface AppProps {
 	onQuit(): void;
 }
 
-function clampIndex(index: number, length: number): number {
-	if (length <= 0) {
-		return 0;
-	}
-	return Math.min(Math.max(index, 0), length - 1);
-}
-
 function countJobsByState(
 	jobs: DaemonJob[],
 	instanceId: string,
@@ -103,17 +112,52 @@ function countJobsByState(
 	return { running, queued };
 }
 
+function rowKey(row: Row): string {
+	return row.kind === "instance"
+		? `i:${row.instance.id}`
+		: `s:${row.instance.id}:${row.session.sessionId}`;
+}
+
+function findFocusIndex(rows: Row[], focus: Focus | undefined): number {
+	if (!focus) return -1;
+	return rows.findIndex((row) => {
+		if (focus.kind === "instance") {
+			return row.kind === "instance" && row.instance.id === focus.instanceId;
+		}
+		return (
+			row.kind === "session" &&
+			row.instance.id === focus.instanceId &&
+			row.session.sessionId === focus.sessionId
+		);
+	});
+}
+
+function focusFromRow(row: Row): Focus {
+	if (row.kind === "instance") {
+		return { kind: "instance", instanceId: row.instance.id };
+	}
+	return {
+		kind: "session",
+		instanceId: row.instance.id,
+		sessionId: row.session.sessionId,
+	};
+}
+
 function Dashboard({
 	onQuit,
 	onSelectInstance,
 }: {
 	onQuit(): void;
-	onSelectInstance(instance: ManagedInstance): void;
+	onSelectInstance(instance: ManagedInstance, ralphSessionId?: string): void;
 }) {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string>();
 	const [data, setData] = useState<DashboardData>();
-	const [selectedIndex, setSelectedIndex] = useState(0);
+	const [focused, setFocused] = useState<Focus>();
+	const [expanded, setExpanded] = useState<Set<string>>(new Set());
+	const [sessionsByInstance, setSessionsByInstance] = useState<
+		Record<string, SessionSummary[]>
+	>({});
 	const [currentModel, setCurrentModel] = useState("");
 	const [modelPicker, setModelPicker] = useState(false);
 	const [modelOptions, setModelOptions] = useState<SelectOption[]>([]);
@@ -139,7 +183,7 @@ function Dashboard({
 		: modelOptions;
 
 	const refresh = useCallback(
-		async (nextIndex = selectedIndex) => {
+		async (nextFocus?: Focus) => {
 			setLoading(true);
 			setError(undefined);
 			try {
@@ -149,15 +193,63 @@ function Dashboard({
 					ralphStore.read(),
 				]);
 				setCurrentModel(storeState.model);
-				const safeIndex = clampIndex(nextIndex, instanceList.instances.length);
-				const selected = instanceList.instances[safeIndex];
-				const jobs = await daemon.listJobs(
-					selected ? { instanceId: selected.id } : {},
+				const instances = instanceList.instances;
+
+				// Fetch sessions for every currently-expanded instance that still exists.
+				const expandedIds = [...expanded].filter((id) =>
+					instances.some((inst) => inst.id === id),
 				);
-				setSelectedIndex(safeIndex);
+				const sessionEntries = await Promise.all(
+					expandedIds.map(async (id) => {
+						try {
+							return [id, await listSessions(id)] as const;
+						} catch {
+							return [id, [] as SessionSummary[]] as const;
+						}
+					}),
+				);
+				const nextSessions: Record<string, SessionSummary[]> = {};
+				for (const [id, list] of sessionEntries) {
+					nextSessions[id] = list;
+				}
+
+				// Resolve next focus against the fresh row list.
+				const candidate = nextFocus ?? focused;
+				const rows = flattenRows(instances, new Set(expandedIds), nextSessions);
+				let resolvedFocus: Focus | undefined;
+				if (candidate) {
+					const idx = findFocusIndex(rows, candidate);
+					if (idx >= 0) {
+						resolvedFocus = candidate;
+					} else if (
+						candidate.kind === "session" &&
+						instances.some((inst) => inst.id === candidate.instanceId)
+					) {
+						// Session disappeared — fall back to parent instance.
+						resolvedFocus = {
+							kind: "instance",
+							instanceId: candidate.instanceId,
+						};
+					}
+				}
+				if (!resolvedFocus) {
+					const firstRow = rows[0];
+					if (firstRow) {
+						resolvedFocus = focusFromRow(firstRow);
+					}
+				}
+
+				const focusedInstanceId = resolvedFocus?.instanceId;
+				const jobs = focusedInstanceId
+					? await daemon.listJobs({ instanceId: focusedInstanceId })
+					: { jobs: [] as DaemonJob[] };
+
+				setFocused(resolvedFocus);
+				setExpanded(new Set(expandedIds));
+				setSessionsByInstance(nextSessions);
 				setData({
 					health,
-					instances: instanceList.instances,
+					instances,
 					jobs: jobs.jobs,
 				});
 			} catch (refreshError) {
@@ -170,12 +262,63 @@ function Dashboard({
 				setLoading(false);
 			}
 		},
-		[selectedIndex],
+		[expanded, focused],
 	);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: initial load only; subsequent refreshes are user-driven
 	useEffect(() => {
 		void refresh();
-	}, [refresh]);
+	}, []);
+
+	const rows: Row[] = data
+		? flattenRows(data.instances, expanded, sessionsByInstance)
+		: [];
+	const focusIndex = findFocusIndex(rows, focused);
+
+	const toggleExpand = useCallback(
+		async (instanceId: string, expand: boolean) => {
+			setExpanded((prev) => {
+				const next = new Set(prev);
+				if (expand) next.add(instanceId);
+				else next.delete(instanceId);
+				return next;
+			});
+			if (expand && !sessionsByInstance[instanceId]) {
+				try {
+					const sessions = await listSessions(instanceId);
+					setSessionsByInstance((prev) => ({
+						...prev,
+						[instanceId]: sessions,
+					}));
+				} catch (err) {
+					setError(
+						err instanceof Error ? err.message : "Failed to list sessions",
+					);
+				}
+			}
+		},
+		[sessionsByInstance],
+	);
+
+	const moveFocus = useCallback(
+		(delta: number) => {
+			if (rows.length === 0) return;
+			const current = focusIndex < 0 ? 0 : focusIndex;
+			const nextIdx = Math.min(Math.max(current + delta, 0), rows.length - 1);
+			if (nextIdx === current) return;
+			const nextRow = rows[nextIdx];
+			if (!nextRow) return;
+			const nextFocus = focusFromRow(nextRow);
+			// Only refetch jobs when the focused instance changes.
+			const prevInstanceId = focused?.instanceId;
+			if (prevInstanceId !== nextFocus.instanceId) {
+				void refresh(nextFocus);
+			} else {
+				setFocused(nextFocus);
+			}
+		},
+		[focused, focusIndex, refresh, rows],
+	);
 
 	useKeyboard((key) => {
 		if (modelPicker) {
@@ -228,32 +371,58 @@ function Dashboard({
 			return;
 		}
 
-		if (!data) {
+		if (!data || !focused) {
 			return;
 		}
 
 		if (key.name === "down" || key.name === "j") {
-			const next = clampIndex(selectedIndex + 1, data.instances.length);
-			void refresh(next);
+			moveFocus(1);
 			return;
 		}
 
 		if (key.name === "up" || key.name === "k") {
-			const next = clampIndex(selectedIndex - 1, data.instances.length);
-			void refresh(next);
+			moveFocus(-1);
+			return;
+		}
+
+		if (key.name === "space") {
+			if (focused.kind === "session") {
+				setFocused({ kind: "instance", instanceId: focused.instanceId });
+				void toggleExpand(focused.instanceId, false);
+				return;
+			}
+			void toggleExpand(focused.instanceId, !expanded.has(focused.instanceId));
 			return;
 		}
 
 		if (key.name === "return") {
-			const selected = data.instances[selectedIndex];
-			if (selected) {
-				onSelectInstance(selected);
+			const focusedInstance = data.instances.find(
+				(inst) => inst.id === focused.instanceId,
+			);
+			if (!focusedInstance) return;
+			if (focused.kind === "session") {
+				onSelectInstance(focusedInstance, focused.sessionId);
+			} else {
+				onSelectInstance(focusedInstance);
 			}
 			return;
 		}
 	});
 
-	const selected = data?.instances[selectedIndex];
+	const focusedInstance = focused
+		? data?.instances.find((inst) => inst.id === focused.instanceId)
+		: undefined;
+	const focusedSession =
+		focused?.kind === "session" && focused
+			? sessionsByInstance[focused.instanceId]?.find(
+					(s) => s.sessionId === focused.sessionId,
+				)
+			: undefined;
+
+	const jobsToDisplay: DaemonJob[] =
+		data && focused && focusedSession
+			? filterJobsForSession(data.jobs, focusedSession)
+			: (data?.jobs ?? []);
 
 	if (modelPicker) {
 		return (
@@ -326,33 +495,65 @@ function Dashboard({
 			<box flexDirection="row" flexGrow={1} gap={2}>
 				<box flexDirection="column" width="55%">
 					<text attributes={TextAttributes.BOLD}>Instances</text>
-					{data?.instances.length ? (
-						data.instances.map((instance: ManagedInstance, index: number) => {
-							const focused = index === selectedIndex;
-							const counts = countJobsByState(data.jobs, instance.id);
+					{rows.length === 0 ? (
+						<text attributes={TextAttributes.DIM}>No instances registered</text>
+					) : (
+						rows.map((row) => {
+							const isFocused =
+								focused !== undefined &&
+								((focused.kind === "instance" &&
+									row.kind === "instance" &&
+									row.instance.id === focused.instanceId) ||
+									(focused.kind === "session" &&
+										row.kind === "session" &&
+										row.instance.id === focused.instanceId &&
+										row.session.sessionId === focused.sessionId));
+							const attrs = isFocused
+								? TextAttributes.BOLD
+								: TextAttributes.DIM;
+							const chevron = isFocused ? ">" : " ";
+
+							if (row.kind === "instance") {
+								const counts = countJobsByState(
+									data?.jobs ?? [],
+									row.instance.id,
+								);
+								const isExpanded = expanded.has(row.instance.id);
+								const hasKnownSessions =
+									sessionsByInstance[row.instance.id] !== undefined;
+								const marker = isExpanded ? "▾" : hasKnownSessions ? "▸" : "▸";
+								return (
+									<text key={rowKey(row)} attributes={attrs}>
+										{`${chevron} ${marker} ${row.instance.name} [${row.instance.status}] ${basename(row.instance.directory)} (${counts.running}r/${counts.queued}q)`}
+									</text>
+								);
+							}
+
+							const { total, completed } = row.session.progress;
 							return (
-								<text
-									key={instance.id}
-									attributes={
-										focused ? TextAttributes.BOLD : TextAttributes.DIM
-									}
-								>
-									{`${focused ? ">" : " "} ${instance.name} [${instance.status}] ${basename(instance.directory)} (${counts.running}r/${counts.queued}q)`}
+								<text key={rowKey(row)} attributes={attrs}>
+									{`    ${chevron} ${row.session.sessionId}  ${row.session.title}  (${completed}/${total} tasks)`}
 								</text>
 							);
 						})
-					) : (
-						<text attributes={TextAttributes.DIM}>No instances registered</text>
 					)}
 				</box>
 
 				<box flexDirection="column" width="45%">
 					<text attributes={TextAttributes.BOLD}>
-						{selected ? `Jobs for ${selected.name}` : "Jobs"}
+						{focusedInstance
+							? focusedSession
+								? `Jobs for ${focusedInstance.name} / ${focusedSession.sessionId}`
+								: `Jobs for ${focusedInstance.name}`
+							: "Jobs"}
 					</text>
-					{selected ? (
-						data?.jobs.length ? (
-							data.jobs.map((job: DaemonJob) => (
+					{focusedInstance ? (
+						focusedSession ? (
+							<text attributes={TextAttributes.DIM}>
+								No jobs recorded for this session yet.
+							</text>
+						) : jobsToDisplay.length ? (
+							jobsToDisplay.map((job: DaemonJob) => (
 								<text key={job.id} attributes={TextAttributes.DIM}>
 									{`${job.id.slice(0, 8)} ${job.state} ${job.task.type === "prompt" ? job.task.prompt : ""}`}
 								</text>
@@ -373,7 +574,7 @@ function Dashboard({
 			<box flexDirection="column" marginTop={1}>
 				<text attributes={TextAttributes.DIM}>
 					{error ??
-						"j/k or arrows: select  enter: chat  m: model  r: refresh  q: quit"}
+						"space: expand/collapse  j/k: move  enter: open  m: model  r: refresh  q: quit"}
 				</text>
 			</box>
 		</box>
@@ -388,6 +589,7 @@ export function App({ onQuit }: AppProps) {
 			<Chat
 				instanceId={view.instanceId}
 				instanceName={view.instanceName}
+				ralphSessionId={view.ralphSessionId}
 				onBack={() => setView({ type: "dashboard" })}
 				onQuit={onQuit}
 			/>
@@ -397,11 +599,12 @@ export function App({ onQuit }: AppProps) {
 	return (
 		<Dashboard
 			onQuit={onQuit}
-			onSelectInstance={(instance) =>
+			onSelectInstance={(instance, ralphSessionId) =>
 				setView({
 					type: "chat",
 					instanceId: instance.id,
 					instanceName: instance.name,
+					ralphSessionId,
 				})
 			}
 		/>
