@@ -44,16 +44,23 @@ function messagesFromJob(job: DaemonJob): ChatMessage[] {
 interface ChatProps {
 	instanceId: string;
 	instanceName: string;
+	sessionId: string | null;
 	onBack(): void;
 	onQuit(): void;
 }
 
-export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
+export function Chat({
+	instanceId,
+	instanceName,
+	sessionId: initialSessionId,
+	onBack,
+	onQuit,
+}: ChatProps) {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [inputValue, setInputValue] = useState("");
 	const [isLoading, setIsLoading] = useState(false);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
-	const [sessionId, setSessionId] = useState<string | null>(null);
+	const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
 	const [hydrated, setHydrated] = useState(false);
 	const sendLockRef = useRef(false);
 	const chatScrollRef = useRef<ScrollBoxRenderable | null>(null);
@@ -142,7 +149,19 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 
 		(async () => {
 			try {
-				const result = await daemon.listJobs({ instanceId });
+				// New chat — no session yet, nothing to hydrate.
+				if (!sessionId) {
+					setMessages([
+						msg(
+							"assistant",
+							`Connected to instance "${instanceName}". Send a message to start.`,
+						),
+					]);
+					setHydrated(true);
+					return;
+				}
+
+				const result = await daemon.listJobs({ instanceId, sessionId });
 				if (cancelled) return;
 
 				const sorted = result.jobs.sort(
@@ -150,22 +169,7 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 						new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
 				);
 
-				// Find the most recent sessionId to scope the conversation.
-				let latestSessionId: string | null = null;
-				for (let i = sorted.length - 1; i >= 0; i--) {
-					const job = sorted[i];
-					if (job?.sessionId) {
-						latestSessionId = job.sessionId;
-						break;
-					}
-				}
-
-				// Filter to jobs in this session (or all if no session found).
-				const sessionJobs = latestSessionId
-					? sorted.filter((j) => j.sessionId === latestSessionId)
-					: sorted;
-
-				if (sessionJobs.length === 0) {
+				if (sorted.length === 0) {
 					setMessages([
 						msg(
 							"assistant",
@@ -180,7 +184,7 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 				const history: ChatMessage[] = [];
 				let runningJob: DaemonJob | null = null;
 
-				for (const job of sessionJobs) {
+				for (const job of sorted) {
 					if (
 						job.state === "succeeded" ||
 						job.state === "failed" ||
@@ -192,7 +196,6 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 					}
 				}
 
-				setSessionId(latestSessionId);
 				setMessages(history);
 				setHydrated(true);
 
@@ -229,7 +232,7 @@ export function Chat({ instanceId, instanceName, onBack, onQuit }: ChatProps) {
 		return () => {
 			cancelled = true;
 		};
-	}, [instanceId, instanceName, consumeStream]);
+	}, [instanceId, instanceName, sessionId, consumeStream]);
 
 	useKeyboard((event) => {
 		if (event.ctrl && event.name === "c") {

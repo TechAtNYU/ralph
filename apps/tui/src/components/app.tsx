@@ -3,6 +3,7 @@ import { type SelectOption, TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import type {
 	DaemonJob,
+	DaemonSession,
 	HealthResult,
 	ManagedInstance,
 } from "@techatnyu/ralphd";
@@ -13,7 +14,12 @@ import { Chat } from "./chat";
 
 type View =
 	| { type: "dashboard" }
-	| { type: "chat"; instanceId: string; instanceName: string };
+	| {
+			type: "chat";
+			instanceId: string;
+			instanceName: string;
+			sessionId: string | null;
+	  };
 
 interface DashboardData {
 	health: HealthResult;
@@ -108,12 +114,20 @@ function Dashboard({
 	onSelectInstance,
 }: {
 	onQuit(): void;
-	onSelectInstance(instance: ManagedInstance): void;
+	onSelectInstance(
+		instance: ManagedInstance,
+		session: DaemonSession | null,
+	): void;
 }) {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string>();
 	const [data, setData] = useState<DashboardData>();
 	const [selectedIndex, setSelectedIndex] = useState(0);
+	const [sessions, setSessions] = useState<DaemonSession[]>([]);
+	const [selectedSessionIndex, setSelectedSessionIndex] = useState(0);
+	const [focusPanel, setFocusPanel] = useState<"instances" | "sessions">(
+		"instances",
+	);
 	const [currentModel, setCurrentModel] = useState("");
 	const [modelPicker, setModelPicker] = useState(false);
 	const [modelOptions, setModelOptions] = useState<SelectOption[]>([]);
@@ -150,11 +164,16 @@ function Dashboard({
 				]);
 				setCurrentModel(storeState.model);
 				const safeIndex = clampIndex(nextIndex, instanceList.instances.length);
-				const selected = instanceList.instances[safeIndex];
-				const jobs = await daemon.listJobs(
-					selected ? { instanceId: selected.id } : {},
-				);
+				const selectedInst = instanceList.instances[safeIndex];
+				const [jobs, sessionResult] = await Promise.all([
+					daemon.listJobs(selectedInst ? { instanceId: selectedInst.id } : {}),
+					selectedInst
+						? daemon.listSessions(selectedInst.id)
+						: Promise.resolve({ sessions: [] }),
+				]);
 				setSelectedIndex(safeIndex);
+				setSessions(sessionResult.sessions);
+				setSelectedSessionIndex(0);
 				setData({
 					health,
 					instances: instanceList.instances,
@@ -232,24 +251,77 @@ function Dashboard({
 			return;
 		}
 
-		if (key.name === "down" || key.name === "j") {
-			const next = clampIndex(selectedIndex + 1, data.instances.length);
-			void refresh(next);
-			return;
-		}
-
-		if (key.name === "up" || key.name === "k") {
-			const next = clampIndex(selectedIndex - 1, data.instances.length);
-			void refresh(next);
-			return;
-		}
-
-		if (key.name === "return") {
-			const selected = data.instances[selectedIndex];
-			if (selected) {
-				onSelectInstance(selected);
+		if (key.name === "tab" || key.name === "l" || key.name === "right") {
+			if (focusPanel === "instances" && sessions.length > 0) {
+				setFocusPanel("sessions");
 			}
 			return;
+		}
+
+		if (key.name === "h" || key.name === "left") {
+			if (focusPanel === "sessions") {
+				setFocusPanel("instances");
+			}
+			return;
+		}
+
+		if (focusPanel === "instances") {
+			if (key.name === "down" || key.name === "j") {
+				const next = clampIndex(selectedIndex + 1, data.instances.length);
+				void refresh(next);
+				return;
+			}
+
+			if (key.name === "up" || key.name === "k") {
+				const next = clampIndex(selectedIndex - 1, data.instances.length);
+				void refresh(next);
+				return;
+			}
+
+			if (key.name === "return") {
+				const inst = data.instances[selectedIndex];
+				if (inst) {
+					onSelectInstance(inst, null);
+				}
+				return;
+			}
+		}
+
+		if (focusPanel === "sessions") {
+			if (key.name === "down" || key.name === "j") {
+				setSelectedSessionIndex((prev) =>
+					clampIndex(prev + 1, sessions.length + 1),
+				);
+				return;
+			}
+
+			if (key.name === "up" || key.name === "k") {
+				setSelectedSessionIndex((prev) =>
+					clampIndex(prev - 1, sessions.length + 1),
+				);
+				return;
+			}
+
+			if (key.name === "return") {
+				const inst = data.instances[selectedIndex];
+				if (!inst) return;
+
+				// Index 0 is "New Chat", rest are sessions
+				if (selectedSessionIndex === 0) {
+					onSelectInstance(inst, null);
+				} else {
+					const session = sessions[selectedSessionIndex - 1];
+					if (session) {
+						onSelectInstance(inst, session);
+					}
+				}
+				return;
+			}
+
+			if (key.name === "escape") {
+				setFocusPanel("instances");
+				return;
+			}
 		}
 	});
 
@@ -348,23 +420,44 @@ function Dashboard({
 
 				<box flexDirection="column" width="45%">
 					<text attributes={TextAttributes.BOLD}>
-						{selected ? `Jobs for ${selected.name}` : "Jobs"}
+						{selected ? `Sessions for ${selected.name}` : "Sessions"}
 					</text>
 					{selected ? (
-						data?.jobs.length ? (
-							data.jobs.map((job: DaemonJob) => (
-								<text key={job.id} attributes={TextAttributes.DIM}>
-									{`${job.id.slice(0, 8)} ${job.state} ${job.task.type === "prompt" ? job.task.prompt : ""}`}
-								</text>
-							))
-						) : (
-							<text attributes={TextAttributes.DIM}>
-								No jobs for the selected instance
+						<>
+							<text
+								attributes={
+									focusPanel === "sessions" && selectedSessionIndex === 0
+										? TextAttributes.BOLD
+										: TextAttributes.DIM
+								}
+							>
+								{`${focusPanel === "sessions" && selectedSessionIndex === 0 ? ">" : " "} + New Chat`}
 							</text>
-						)
+							{sessions.length > 0 ? (
+								sessions.map((session: DaemonSession, index: number) => {
+									const focused =
+										focusPanel === "sessions" &&
+										index === selectedSessionIndex - 1;
+									return (
+										<text
+											key={session.id}
+											attributes={
+												focused ? TextAttributes.BOLD : TextAttributes.DIM
+											}
+										>
+											{`${focused ? ">" : " "} ${session.title}`}
+										</text>
+									);
+								})
+							) : (
+								<text attributes={TextAttributes.DIM}>
+									No sessions yet — press enter to start
+								</text>
+							)}
+						</>
 					) : (
 						<text attributes={TextAttributes.DIM}>
-							Select an instance to inspect jobs
+							Select an instance to see sessions
 						</text>
 					)}
 				</box>
@@ -373,7 +466,7 @@ function Dashboard({
 			<box flexDirection="column" marginTop={1}>
 				<text attributes={TextAttributes.DIM}>
 					{error ??
-						"j/k or arrows: select  enter: chat  m: model  r: refresh  q: quit"}
+						"j/k: select  tab/h/l: switch panel  enter: open  m: model  r: refresh  q: quit"}
 				</text>
 			</box>
 		</box>
@@ -388,6 +481,7 @@ export function App({ onQuit }: AppProps) {
 			<Chat
 				instanceId={view.instanceId}
 				instanceName={view.instanceName}
+				sessionId={view.sessionId}
 				onBack={() => setView({ type: "dashboard" })}
 				onQuit={onQuit}
 			/>
@@ -397,11 +491,12 @@ export function App({ onQuit }: AppProps) {
 	return (
 		<Dashboard
 			onQuit={onQuit}
-			onSelectInstance={(instance) =>
+			onSelectInstance={(instance, session) =>
 				setView({
 					type: "chat",
 					instanceId: instance.id,
 					instanceName: instance.name,
+					sessionId: session?.id ?? null,
 				})
 			}
 		/>
