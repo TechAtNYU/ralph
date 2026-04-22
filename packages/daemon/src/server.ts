@@ -319,6 +319,7 @@ export class Daemon {
 		request: RequestByMethod<"provider.list">,
 	): Promise<ProviderListResult> {
 		return this.registry.queryProviders(
+			this.state.instances.map((instance: ManagedInstance) => instance.directory),
 			request.params.directory,
 			request.params.refresh,
 		);
@@ -646,7 +647,10 @@ export class Daemon {
 	): Promise<void> {
 		try {
 			const instance = await this.startInstance(job.instanceId);
-			const runtime = await this.registry.ensureStarted(instance.id);
+			const runtime = await this.registry.ensureStarted(
+				instance.id,
+				instance.directory,
+			);
 			const sessionId = await this.resolveSession(
 				runtime.client,
 				instance,
@@ -745,7 +749,7 @@ export class Daemon {
 		await this.store.save(this.state);
 
 		try {
-			await this.registry.ensureStarted(instanceId);
+			await this.registry.ensureStarted(instanceId, current.directory);
 			const running: ManagedInstance = {
 				...starting,
 				status: "running",
