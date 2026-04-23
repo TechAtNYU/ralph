@@ -357,6 +357,85 @@ describe("Daemon", () => {
 		expect(finalJob.error).toBe("Job cancelled");
 	});
 
+	test("cancelling a running job returns within the timeout when the remote is slow", async () => {
+		// Recreate the daemon with a very long prompt delay and a short
+		// cancel wait timeout. The fake runtime's `abort` is a no-op so
+		// the prompt always runs to completion — this simulates a remote
+		// runtime that ignores `session.abort`.
+		await daemon.shutdown();
+		const slowRegistry = new FakeOpencodeRegistry(1_000);
+		const slowStore = new StateStore(join(tmpDir, "slow.sqlite"));
+		const slowDaemon = new Daemon(slowStore, {
+			registry: slowRegistry,
+			cancelWaitTimeoutMs: 30,
+		});
+		await slowDaemon.bootstrap();
+
+		const created = await slowDaemon.handleRequest(
+			req({
+				id: "inst",
+				method: "instance.create",
+				params: {
+					name: "slow",
+					directory: "/tmp/project-slow",
+					maxConcurrency: 1,
+				},
+			}),
+		);
+		const instanceId = expectSuccess(created, "instance.create").instance.id;
+
+		const submitted = await slowDaemon.handleRequest(
+			req({
+				id: "sub",
+				method: "job.submit",
+				params: {
+					instanceId,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "slow" },
+				},
+			}),
+		);
+		const jobId = expectSuccess(submitted, "job.submit").job.id;
+
+		// Wait until the job is running.
+		await Bun.sleep(20);
+
+		// Cancel and measure.
+		const start = Date.now();
+		const cancel = await slowDaemon.handleRequest(
+			req({
+				id: "cancel",
+				method: "job.cancel",
+				params: { jobId },
+			}),
+		);
+		const elapsed = Date.now() - start;
+
+		// Must return well before the 1s prompt delay completes.
+		expect(elapsed).toBeLessThan(500);
+		// Returned row may still be `running` (timeout fired first) — that
+		// is the point of the timeout; the terminal row will arrive via
+		// the `done` stream event.
+		const returned = expectSuccess(cancel, "job.cancel").job;
+		expect(["running", "cancelled"]).toContain(returned.state);
+
+		// Allow the fake's prompt to complete and executeJob to record
+		// the terminal row.
+		await Bun.sleep(1_100);
+		const get = await slowDaemon.handleRequest(
+			req({
+				id: "get",
+				method: "job.get",
+				params: { jobId },
+			}),
+		);
+		const settled = expectSuccess(get, "job.get").job;
+		expect(settled.state).toBe("cancelled");
+		expect(settled.error).toBe("Job cancelled");
+
+		await slowDaemon.shutdown();
+	});
+
 	test("session.list rejects unknown instance ids", async () => {
 		const response = await daemon.handleRequest(
 			req({

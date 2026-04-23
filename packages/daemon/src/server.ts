@@ -40,6 +40,15 @@ import {
 import { type JobSessionRef, StateStore, StoreError } from "./store";
 
 const MAX_TERMINAL_JOBS = 100;
+/**
+ * Upper bound on how long `job.cancel` will wait for the in-flight execution
+ * to settle after the local abort + remote `session.abort` have been issued.
+ * If the remote runtime ignores or is slow to honor the abort, the RPC still
+ * returns promptly with the job's current (non-terminal) row, and the
+ * executor's eventual terminal write is delivered via the `done` stream
+ * event.
+ */
+const CANCEL_WAIT_TIMEOUT_MS = 2_000;
 
 interface RunningJob {
 	controller: AbortController;
@@ -49,6 +58,8 @@ interface RunningJob {
 interface DaemonOptions {
 	registry?: OpencodeRuntimeManager;
 	maxConcurrency?: number;
+	/** Override for `CANCEL_WAIT_TIMEOUT_MS`. Tests only. */
+	cancelWaitTimeoutMs?: number;
 }
 
 function extractText(parts: Part[]): string {
@@ -78,6 +89,30 @@ function deriveSessionTitle(sessionRef: JobSessionRef, job: DaemonJob): string {
 		return text;
 	}
 	return "Untitled";
+}
+
+/**
+ * Resolves when either `promise` settles or `timeoutMs` elapses, whichever
+ * comes first. Never rejects. The caller should read downstream state from
+ * the store after this returns — the returned value is intentionally unused.
+ */
+function raceWithTimeout(
+	promise: Promise<unknown>,
+	timeoutMs: number,
+): Promise<void> {
+	return new Promise<void>((resolve) => {
+		let settled = false;
+		const done = () => {
+			if (settled) return;
+			settled = true;
+			resolve();
+		};
+		const timer = setTimeout(done, timeoutMs);
+		promise.finally(() => {
+			clearTimeout(timer);
+			done();
+		});
+	});
 }
 
 function normalizeErrorMessage(error: unknown): string {
@@ -121,6 +156,7 @@ export class Daemon {
 	private shutdownPromise: Promise<void> | undefined;
 	private instanceCursor = 0;
 	private readonly maxConcurrency: number;
+	private readonly cancelWaitTimeoutMs: number;
 
 	constructor(
 		private readonly store: StateStore,
@@ -140,6 +176,8 @@ export class Daemon {
 		});
 		this.maxConcurrency =
 			options.maxConcurrency ?? resolveDaemonRuntimeEnv().maxConcurrency;
+		this.cancelWaitTimeoutMs =
+			options.cancelWaitTimeoutMs ?? CANCEL_WAIT_TIMEOUT_MS;
 	}
 
 	setShutdownHandler(handler: () => void): void {
@@ -409,9 +447,15 @@ export class Daemon {
 			void this.abortRemoteSession(running.instanceId, remoteSessionId);
 		}
 
+		// Wait for `executeJob` to settle so the caller sees the terminal
+		// row, but cap the wait: the SDK prompt is not wired to our abort
+		// signal, so if the remote runtime is slow to honor `session.abort`
+		// we would otherwise block the RPC for the full prompt duration.
+		// On timeout, return the current (still-running) row — the caller
+		// can subscribe to `job.stream` for the eventual `done` event.
 		const execution = this.runningTasks.get(job.id);
 		if (execution) {
-			await execution;
+			await raceWithTimeout(execution, this.cancelWaitTimeoutMs);
 		}
 
 		return { job: this.store.assertJob(job.id) };
