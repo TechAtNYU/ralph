@@ -312,6 +312,7 @@ export class Daemon {
 	private handleSessionList(
 		request: RequestByMethod<"session.list">,
 	): SessionListResult {
+		this.store.assertInstance(request.params.instanceId);
 		return {
 			sessions: this.store.listSessions({
 				instanceId: request.params.instanceId,
@@ -386,18 +387,34 @@ export class Daemon {
 			return { job: cancelled };
 		}
 
+		// Running branch: let `executeJob` own the single terminal write so
+		// there is exactly one state transition and one `done` event. We
+		// abort the controller (which triggers `executeJob`'s catch path or
+		// the aborted-after-success branch) and await completion before
+		// returning the terminal job row.
 		const running = this.runningJobs.get(job.id);
-		const cancelled = this.store.markJobTerminal(job.id, "cancelled", {
-			error: "Job cancelled",
-		});
-		if (running) {
-			running.controller.abort();
-			const remoteSessionId = this.runningSessionIds.get(job.id);
-			if (remoteSessionId) {
-				void this.abortRemoteSession(running.instanceId, remoteSessionId);
-			}
+		if (!running) {
+			// Job was in state=running per the store, but no in-memory task —
+			// likely a stale state. Fall back to writing the terminal row
+			// directly so the caller still sees a cancelled job.
+			const cancelled = this.store.markJobTerminal(job.id, "cancelled", {
+				error: "Job cancelled",
+			});
+			return { job: cancelled };
 		}
-		return { job: cancelled };
+
+		running.controller.abort();
+		const remoteSessionId = this.runningSessionIds.get(job.id);
+		if (remoteSessionId) {
+			void this.abortRemoteSession(running.instanceId, remoteSessionId);
+		}
+
+		const execution = this.runningTasks.get(job.id);
+		if (execution) {
+			await execution;
+		}
+
+		return { job: this.store.assertJob(job.id) };
 	}
 
 	/**
@@ -635,7 +652,14 @@ export class Daemon {
 			if (!current?.outputText || current.outputText.length === 0) {
 				patch.outputText = extractText(response.parts);
 			}
-			terminalState = controller.signal.aborted ? "cancelled" : "succeeded";
+			if (controller.signal.aborted) {
+				// prompt() returned successfully but the job was cancelled before
+				// the abort was observed — record the cancellation reason.
+				terminalState = "cancelled";
+				patch.error = "Job cancelled";
+			} else {
+				terminalState = "succeeded";
+			}
 		} catch (error) {
 			terminalState = controller.signal.aborted ? "cancelled" : "failed";
 			patch.error = controller.signal.aborted

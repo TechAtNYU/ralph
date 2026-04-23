@@ -301,6 +301,125 @@ describe("Daemon", () => {
 		expect(expectSuccess(cancel, "job.cancel").job.state).toBe("cancelled");
 	});
 
+	test("cancelling a running job preserves the cancel error on the terminal row", async () => {
+		const created = await daemon.handleRequest(
+			req({
+				id: "instance-create",
+				method: "instance.create",
+				params: {
+					name: "One",
+					directory: "/tmp/project-one",
+					maxConcurrency: 1,
+				},
+			}),
+		);
+		const createdResult = expectSuccess(created, "instance.create");
+
+		const submitted = await daemon.handleRequest(
+			req({
+				id: "job-submit",
+				method: "job.submit",
+				params: {
+					instanceId: createdResult.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "long-task" },
+				},
+			}),
+		);
+		const submittedResult = expectSuccess(submitted, "job.submit");
+
+		// Wait until the job has transitioned to running inside the fake runtime.
+		await Bun.sleep(10);
+
+		const cancel = await daemon.handleRequest(
+			req({
+				id: "job-cancel",
+				method: "job.cancel",
+				params: { jobId: submittedResult.job.id },
+			}),
+		);
+		const cancelled = expectSuccess(cancel, "job.cancel").job;
+		expect(cancelled.state).toBe("cancelled");
+		expect(cancelled.error).toBe("Job cancelled");
+
+		// Double-check via store after execution has fully settled — no later
+		// terminal write should have nulled out the error column.
+		await Bun.sleep(60);
+		const get = await daemon.handleRequest(
+			req({
+				id: "job-get",
+				method: "job.get",
+				params: { jobId: submittedResult.job.id },
+			}),
+		);
+		const finalJob = expectSuccess(get, "job.get").job;
+		expect(finalJob.state).toBe("cancelled");
+		expect(finalJob.error).toBe("Job cancelled");
+	});
+
+	test("session.list rejects unknown instance ids", async () => {
+		const response = await daemon.handleRequest(
+			req({
+				id: "session-list",
+				method: "session.list",
+				params: { instanceId: "does-not-exist" },
+			}),
+		);
+		expect(expectFailure(response).error.code).toBe("not_found");
+	});
+
+	test("submitting a second job during an in-flight drain still runs it promptly", async () => {
+		const createOne = await daemon.handleRequest(
+			req({
+				id: "inst-1",
+				method: "instance.create",
+				params: { name: "One", directory: "/tmp/project-one" },
+			}),
+		);
+		const createTwo = await daemon.handleRequest(
+			req({
+				id: "inst-2",
+				method: "instance.create",
+				params: { name: "Two", directory: "/tmp/project-two" },
+			}),
+		);
+		const one = expectSuccess(createOne, "instance.create");
+		const two = expectSuccess(createTwo, "instance.create");
+
+		// Submit two jobs back-to-back. The second submit happens while the
+		// first scheduleDrain()'s microtask/promise is still in flight and
+		// must be coalesced via drainPending so the second job runs without
+		// waiting for the first to complete.
+		await daemon.handleRequest(
+			req({
+				id: "submit-1",
+				method: "job.submit",
+				params: {
+					instanceId: one.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "first" },
+				},
+			}),
+		);
+		await daemon.handleRequest(
+			req({
+				id: "submit-2",
+				method: "job.submit",
+				params: {
+					instanceId: two.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "second" },
+				},
+			}),
+		);
+
+		// Fake prompt delay is 40ms; if drain coalescing regressed, the
+		// second job would run strictly after the first and both jobs would
+		// not be concurrently active.
+		await Bun.sleep(30);
+		expect(registry.globalMaxConcurrent).toBeGreaterThanOrEqual(2);
+	});
+
 	test("requeues running jobs after restart", async () => {
 		// Shut down the beforeEach daemon so we can simulate a crashed state
 		// by writing directly to the SQLite file.
@@ -573,7 +692,8 @@ describe("Daemon sessions", () => {
 			}),
 		);
 
-		// Verify sessions are gone
+		// After removal, session.list for that instance must fail with
+		// not_found — the cascade deletes sessions with the instance row.
 		const after = await daemon.handleRequest(
 			req({
 				id: "session-list-after",
@@ -581,7 +701,7 @@ describe("Daemon sessions", () => {
 				params: { instanceId },
 			}),
 		);
-		expect(expectSuccess(after, "session.list").sessions).toHaveLength(0);
+		expect(expectFailure(after).error.code).toBe("not_found");
 	});
 });
 

@@ -187,7 +187,6 @@ export class StateStore {
 				setJobState: Statement;
 				setJobTerminal: Statement;
 				appendJobOutput: Statement;
-				setJobMessageId: Statement;
 				deleteOldTerminalJobs: Statement;
 
 				countJobsByState: Statement<{ c: number }, [JobState]>;
@@ -316,9 +315,9 @@ export class StateStore {
 				   updated_at = $updated_at
 				 WHERE id = $id`,
 			),
-			setJobMessageId: db.query(
-				`UPDATE jobs SET message_id = $message_id, updated_at = $updated_at WHERE id = $id`,
-			),
+			// Keep the newest `$max` terminal rows; delete the rest.
+			// In SQLite, `LIMIT -1` means "no upper bound", so this selects
+			// every row past the first `$max` in DESC order.
 			deleteOldTerminalJobs: db.query(
 				`DELETE FROM jobs WHERE id IN (
 				   SELECT id FROM jobs
@@ -421,10 +420,18 @@ export class StateStore {
 			});
 		} catch (err) {
 			if (isUniqueConstraint(err)) {
-				throw new StoreError(
-					"conflict",
-					`instance already exists for directory ${instance.directory}`,
-				);
+				// Today the only unique index on `instances` (aside from the
+				// primary key) is on `directory`. If that changes the error
+				// message would become misleading, so check the message
+				// before blaming the directory column.
+				const message = err instanceof Error ? err.message : String(err);
+				if (/instances\.directory/i.test(message)) {
+					throw new StoreError(
+						"conflict",
+						`instance already exists for directory ${instance.directory}`,
+					);
+				}
+				throw new StoreError("conflict", message);
 			}
 			throw err;
 		}
@@ -512,18 +519,29 @@ export class StateStore {
 	 * Attach a remote OpenCode session id to the session row that backs
 	 * the given job. Used once a new session has been created on the
 	 * remote runtime during job execution.
+	 *
+	 * Throws `StoreError("not_found")` if the job id (or its backing
+	 * session row) does not exist — this surfaces silent assignment
+	 * failures that would otherwise leave the caller holding a remote
+	 * session that SQLite never linked.
 	 */
 	assignRemoteSessionToJob(
 		jobId: string,
 		remoteSessionId: string,
 		title: string,
 	): void {
-		this.s().assignRemoteSessionToJob.run({
+		const result = this.s().assignRemoteSessionToJob.run({
 			$job_id: jobId,
 			$remote_session_id: remoteSessionId,
 			$title: title,
 			$updated_at: new Date().toISOString(),
 		});
+		if (result.changes === 0) {
+			throw new StoreError(
+				"not_found",
+				`cannot assign remote session to job ${jobId}: job or session row missing`,
+			);
+		}
 	}
 
 	/** Sessions visible to the TUI: only rows with a resolved remote OpenCode session id. */
@@ -699,14 +717,6 @@ export class StateStore {
 		this.s().appendJobOutput.run({
 			$id: id,
 			$delta: delta,
-			$updated_at: new Date().toISOString(),
-		});
-	}
-
-	setJobMessageId(id: string, messageId: string): void {
-		this.s().setJobMessageId.run({
-			$id: id,
-			$message_id: messageId,
 			$updated_at: new Date().toISOString(),
 		});
 	}

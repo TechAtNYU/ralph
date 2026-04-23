@@ -256,4 +256,70 @@ describe("StateStore", () => {
 		expect(store.assertJob(job.id).state).toBe("queued");
 		expect(store.assertInstance(instance.id).status).toBe("stopped");
 	});
+
+	test("recoverForBootstrap appends to existing job error on requeue", () => {
+		const instance = store.createInstance({
+			name: "A",
+			directory: "/tmp/a",
+			maxConcurrency: 1,
+		});
+		const job = store.createJob({
+			instanceId: instance.id,
+			session: { type: "new" },
+			task: { type: "prompt", prompt: "hi" },
+		});
+		// Seed a running job that already has a non-null error (e.g. from a
+		// prior partial terminal write that did not commit to a terminal state).
+		store.markJobRunning(job.id);
+		const db = new Database(databasePath);
+		db.run("UPDATE jobs SET error = 'prior error' WHERE id = ?", [job.id]);
+		db.close();
+
+		store.recoverForBootstrap();
+		const recovered = store.assertJob(job.id);
+		expect(recovered.state).toBe("queued");
+		expect(recovered.error).toBe("prior error Recovered after daemon restart");
+	});
+
+	test("assignRemoteSessionToJob throws when job does not exist", () => {
+		expect(() =>
+			store.assignRemoteSessionToJob(
+				"00000000-0000-0000-0000-000000000000",
+				"remote-xyz",
+				"title",
+			),
+		).toThrow(StoreError);
+	});
+
+	test("pruneTerminalJobs keeps the newest N terminal rows", () => {
+		const instance = store.createInstance({
+			name: "A",
+			directory: "/tmp/a",
+			maxConcurrency: 1,
+		});
+		const ids: string[] = [];
+		for (let i = 0; i < 5; i++) {
+			const job = store.createJob({
+				instanceId: instance.id,
+				session: { type: "new" },
+				task: { type: "prompt", prompt: `p-${i}` },
+			});
+			store.markJobTerminal(job.id, "succeeded", { outputText: String(i) });
+			ids.push(job.id);
+			// Space created_at so ordering is deterministic.
+			const db = new Database(databasePath);
+			db.run("UPDATE jobs SET created_at = ? WHERE id = ?", [
+				new Date(Date.now() + i * 1000).toISOString(),
+				job.id,
+			]);
+			db.close();
+		}
+		store.pruneTerminalJobs(2);
+		const remaining = store.listJobs();
+		expect(remaining).toHaveLength(2);
+		// Newest two should survive (ids[4], ids[3]).
+		const remainingIds = new Set(remaining.map((j) => j.id));
+		expect(remainingIds.has(ids[4] as string)).toBe(true);
+		expect(remainingIds.has(ids[3] as string)).toBe(true);
+	});
 });
