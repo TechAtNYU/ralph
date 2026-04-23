@@ -31,11 +31,13 @@ import {
 	type ResponseError,
 	type ResponseMessage,
 	type ResultByMethod,
+	type SessionGetResult,
+	type SessionListResult,
 	type ShutdownResult,
 	type StreamAckResult,
 	type SubmitResult,
 } from "./protocol";
-import { StateStore, StoreError } from "./store";
+import { type JobSessionRef, StateStore, StoreError } from "./store";
 
 const MAX_TERMINAL_JOBS = 100;
 
@@ -57,6 +59,25 @@ function extractText(parts: Part[]): string {
 		.map((part) => part.text)
 		.join("\n")
 		.trim();
+}
+
+const MAX_SESSION_TITLE_LENGTH = 80;
+
+function deriveSessionTitle(sessionRef: JobSessionRef, job: DaemonJob): string {
+	if (sessionRef.kind === "new" && sessionRef.title) {
+		return sessionRef.title;
+	}
+	if (job.task.type === "prompt") {
+		const text = job.task.prompt.trim();
+		if (text.length === 0) {
+			return "Untitled";
+		}
+		if (text.length > MAX_SESSION_TITLE_LENGTH) {
+			return `${text.slice(0, MAX_SESSION_TITLE_LENGTH - 3)}...`;
+		}
+		return text;
+	}
+	return "Untitled";
 }
 
 function normalizeErrorMessage(error: unknown): string {
@@ -94,6 +115,8 @@ export class Daemon {
 	private startedAt = Date.now();
 	private onShutdown: (() => void) | undefined;
 	private drainPromise: Promise<void> | undefined;
+	/** True if `scheduleDrain` ran while a drain was already in flight — run again when it finishes. */
+	private drainPending = false;
 	private shuttingDown = false;
 	private shutdownPromise: Promise<void> | undefined;
 	private instanceCursor = 0;
@@ -162,8 +185,12 @@ export class Daemon {
 					return this.success(raw, await this.handleInstanceRemove(raw));
 				case "provider.list":
 					return this.success(raw, await this.handleProviderList(raw));
+				case "session.list":
+					return this.success(raw, this.handleSessionList(raw));
+				case "session.get":
+					return this.success(raw, this.handleSessionGet(raw));
 				case "job.submit":
-					return this.success(raw, await this.handleJobSubmit(raw));
+					return this.success(raw, this.handleJobSubmit(raw));
 				case "job.list":
 					return this.success(raw, this.handleJobList(raw));
 				case "job.get":
@@ -276,9 +303,28 @@ export class Daemon {
 		request: RequestByMethod<"provider.list">,
 	): Promise<ProviderListResult> {
 		return this.registry.queryProviders(
+			this.store.listInstances().map((instance) => instance.directory),
 			request.params.directory,
 			request.params.refresh,
 		);
+	}
+
+	private handleSessionList(
+		request: RequestByMethod<"session.list">,
+	): SessionListResult {
+		return {
+			sessions: this.store.listSessions({
+				instanceId: request.params.instanceId,
+			}),
+		};
+	}
+
+	private handleSessionGet(
+		request: RequestByMethod<"session.get">,
+	): SessionGetResult {
+		return {
+			session: this.store.assertSession(request.params.sessionId),
+		};
 	}
 
 	private handleJobSubmit(
@@ -471,11 +517,16 @@ export class Daemon {
 
 	private scheduleDrain(): void {
 		if (this.drainPromise) {
+			this.drainPending = true;
 			return;
 		}
 
 		this.drainPromise = this.drainQueue().finally(() => {
 			this.drainPromise = undefined;
+			if (this.drainPending) {
+				this.drainPending = false;
+				this.scheduleDrain();
+			}
 		});
 	}
 
@@ -549,7 +600,10 @@ export class Daemon {
 
 		try {
 			const instance = await this.startInstance(job.instanceId);
-			const runtime = await this.registry.ensureStarted(instance.id);
+			const runtime = await this.registry.ensureStarted(
+				instance.id,
+				instance.directory,
+			);
 			const sessionId = await this.resolveSession(
 				runtime.client,
 				instance,
@@ -602,13 +656,12 @@ export class Daemon {
 		const sessionRef = this.store.getSessionForJob(job.id);
 		if (sessionRef.remoteSessionId) return sessionRef.remoteSessionId;
 
-		// No remote id yet — this is a `{type: 'new'}` submission. The
-		// sessions row was created at submit time; fill in its remote id.
+		const title = deriveSessionTitle(sessionRef, job);
 		const session = await client.session.create({
 			directory: instance.directory,
-			title: sessionRef.kind === "new" ? sessionRef.title : undefined,
+			title,
 		});
-		this.store.assignRemoteSessionToJob(job.id, session.id);
+		this.store.assignRemoteSessionToJob(job.id, session.id, title);
 		return session.id;
 	}
 
@@ -624,7 +677,7 @@ export class Daemon {
 		this.store.setInstanceStatus(instanceId, "starting");
 
 		try {
-			await this.registry.ensureStarted(instanceId);
+			await this.registry.ensureStarted(instanceId, current.directory);
 			return this.store.setInstanceStatus(instanceId, "running");
 		} catch (error) {
 			const message = normalizeErrorMessage(error);

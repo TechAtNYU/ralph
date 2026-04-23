@@ -89,6 +89,16 @@ export const DaemonJob = z.strictObject({
 });
 export type DaemonJob = z.infer<typeof DaemonJob>;
 
+/** A conversation session belonging to an instance (id is the remote OpenCode session id). */
+export const DaemonSession = z.strictObject({
+	id: z.string().min(1),
+	instanceId: z.string().min(1),
+	title: z.string().min(1),
+	createdAt: IsoDateTime,
+	updatedAt: IsoDateTime,
+});
+export type DaemonSession = z.infer<typeof DaemonSession>;
+
 // ---------------------------------------------------------------------------
 // Request params — per-method input payloads
 // ---------------------------------------------------------------------------
@@ -135,6 +145,18 @@ const ProviderListParams = z.strictObject({
 });
 export type ProviderListParams = z.infer<typeof ProviderListParams>;
 
+// Session operations
+
+const SessionListParams = z.strictObject({
+	instanceId: z.string().min(1),
+});
+export type SessionListParams = z.infer<typeof SessionListParams>;
+
+const SessionGetParams = z.strictObject({
+	sessionId: z.string().min(1),
+});
+export type SessionGetParams = z.infer<typeof SessionGetParams>;
+
 // Job operations
 
 const JobSubmitParams = z.strictObject({
@@ -146,6 +168,7 @@ export type JobSubmitParams = z.infer<typeof JobSubmitParams>;
 
 const JobListParams = z.strictObject({
 	instanceId: z.string().min(1).optional(),
+	sessionId: z.string().min(1).optional(),
 	state: JobState.optional(),
 });
 export type JobListParams = z.infer<typeof JobListParams>;
@@ -208,6 +231,18 @@ const InstanceListResult = z.strictObject({
 	instances: z.array(ManagedInstance),
 });
 export type InstanceListResult = z.infer<typeof InstanceListResult>;
+
+// Session results
+
+const SessionListResult = z.strictObject({
+	sessions: z.array(DaemonSession),
+});
+export type SessionListResult = z.infer<typeof SessionListResult>;
+
+const SessionGetResult = z.strictObject({
+	session: DaemonSession,
+});
+export type SessionGetResult = z.infer<typeof SessionGetResult>;
 
 // Job results
 
@@ -336,6 +371,8 @@ const RequestMethod = z.enum([
 	"instance.stop",
 	"instance.remove",
 	"provider.list",
+	"session.list",
+	"session.get",
 	"job.submit",
 	"job.list",
 	"job.get",
@@ -404,6 +441,20 @@ const ProviderListRequest = z.strictObject({
 	params: ProviderListParams,
 });
 
+// Session requests
+
+const SessionListRequest = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("session.list"),
+	params: SessionListParams,
+});
+
+const SessionGetRequest = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("session.get"),
+	params: SessionGetParams,
+});
+
 // Job requests
 
 const JobSubmitRequest = z.strictObject({
@@ -447,6 +498,8 @@ export const RequestMessage = z.discriminatedUnion("method", [
 	InstanceStopRequest,
 	InstanceRemoveRequest,
 	ProviderListRequest,
+	SessionListRequest,
+	SessionGetRequest,
 	JobSubmitRequest,
 	JobListRequest,
 	JobGetRequest,
@@ -528,6 +581,22 @@ const ProviderListSuccess = z.strictObject({
 	result: ProviderListResult,
 });
 
+// Session successes
+
+const SessionListSuccess = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("session.list"),
+	ok: z.literal(true),
+	result: SessionListResult,
+});
+
+const SessionGetSuccess = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("session.get"),
+	ok: z.literal(true),
+	result: SessionGetResult,
+});
+
 // Job successes
 
 const JobSubmitSuccess = z.strictObject({
@@ -586,6 +655,8 @@ export const ResponseMessage = z.union([
 	InstanceStopSuccess,
 	InstanceRemoveSuccess,
 	ProviderListSuccess,
+	SessionListSuccess,
+	SessionGetSuccess,
 	JobSubmitSuccess,
 	JobListSuccess,
 	JobGetSuccess,

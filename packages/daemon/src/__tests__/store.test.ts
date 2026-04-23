@@ -115,6 +115,51 @@ describe("StateStore", () => {
 		expect(row.c).toBe(1);
 	});
 
+	test("listSessions and assertSession only include resolved remote ids", () => {
+		const instance = store.createInstance({
+			name: "One",
+			directory: "/tmp/project-one",
+			maxConcurrency: 1,
+		});
+		const job = store.createJob({
+			instanceId: instance.id,
+			session: { type: "new" },
+			task: { type: "prompt", prompt: "hi" },
+		});
+		expect(store.listSessions({ instanceId: instance.id })).toHaveLength(0);
+
+		store.assignRemoteSessionToJob(job.id, "remote-abc", "My title");
+		const sessions = store.listSessions({ instanceId: instance.id });
+		expect(sessions).toHaveLength(1);
+		expect(sessions[0]?.id).toBe("remote-abc");
+		expect(sessions[0]?.title).toBe("My title");
+		expect(store.assertSession("remote-abc").instanceId).toBe(instance.id);
+	});
+
+	test("listJobs filters by sessionId", () => {
+		const instance = store.createInstance({
+			name: "One",
+			directory: "/tmp/project-one",
+			maxConcurrency: 1,
+		});
+		const j1 = store.createJob({
+			instanceId: instance.id,
+			session: { type: "new" },
+			task: { type: "prompt", prompt: "a" },
+		});
+		const j2 = store.createJob({
+			instanceId: instance.id,
+			session: { type: "new" },
+			task: { type: "prompt", prompt: "b" },
+		});
+		store.assignRemoteSessionToJob(j1.id, "sess-x", "t1");
+		store.assignRemoteSessionToJob(j2.id, "sess-y", "t2");
+
+		const filtered = store.listJobs({ sessionId: "sess-x" });
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0]?.id).toBe(j1.id);
+	});
+
 	test("markJobRunning and markJobTerminal drive state transitions", () => {
 		const instance = store.createInstance({
 			name: "One",

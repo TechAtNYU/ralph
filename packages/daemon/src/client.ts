@@ -186,6 +186,18 @@ export class DaemonClient {
 		>;
 	}
 
+	listSessions(instanceId: string) {
+		return send(this.socketPath, "session.list", { instanceId }) as Promise<
+			ResultByMethod<"session.list">
+		>;
+	}
+
+	getSession(sessionId: string) {
+		return send(this.socketPath, "session.get", { sessionId }) as Promise<
+			ResultByMethod<"session.get">
+		>;
+	}
+
 	submitJob(params: ParamsByMethod<"job.submit">) {
 		return send(this.socketPath, "job.submit", params) as Promise<
 			ResultByMethod<"job.submit">

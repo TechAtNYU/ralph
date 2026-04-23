@@ -341,6 +341,250 @@ describe("Daemon", () => {
 	});
 });
 
+describe("Daemon sessions", () => {
+	let tmpDir: string;
+	let store: StateStore;
+	let registry: FakeOpencodeRegistry;
+	let daemon: Daemon;
+
+	beforeEach(async () => {
+		tmpDir = await mkdtemp(join(tmpdir(), "ralph-daemon-session-"));
+		store = new StateStore(join(tmpDir, "state.sqlite"));
+		registry = new FakeOpencodeRegistry(10);
+		daemon = new Daemon(store, { registry });
+		await daemon.bootstrap();
+	});
+
+	afterEach(async () => {
+		await daemon.shutdown();
+		await rm(tmpDir, { recursive: true, force: true });
+	});
+
+	async function createInstance(
+		name = "One",
+		directory = "/tmp/project-one",
+	): Promise<string> {
+		const res = await daemon.handleRequest(
+			req({
+				id: `create-${name}`,
+				method: "instance.create",
+				params: { name, directory },
+			}),
+		);
+		return expectSuccess(res, "instance.create").instance.id;
+	}
+
+	test("creates a session when a new-session job completes", async () => {
+		const instanceId = await createInstance();
+
+		await daemon.handleRequest(
+			req({
+				id: "submit",
+				method: "job.submit",
+				params: {
+					instanceId,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "hello world" },
+				},
+			}),
+		);
+
+		await Bun.sleep(80);
+
+		const res = await daemon.handleRequest(
+			req({
+				id: "session-list",
+				method: "session.list",
+				params: { instanceId },
+			}),
+		);
+		const result = expectSuccess(res, "session.list");
+		expect(result.sessions).toHaveLength(1);
+		expect(result.sessions[0]?.instanceId).toBe(instanceId);
+		expect(result.sessions[0]?.title).toBe("hello world");
+	});
+
+	test("derives title from prompt text, truncating long prompts", async () => {
+		const instanceId = await createInstance();
+		const longPrompt = "a".repeat(200);
+
+		await daemon.handleRequest(
+			req({
+				id: "submit",
+				method: "job.submit",
+				params: {
+					instanceId,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: longPrompt },
+				},
+			}),
+		);
+
+		await Bun.sleep(80);
+
+		const res = await daemon.handleRequest(
+			req({
+				id: "session-list",
+				method: "session.list",
+				params: { instanceId },
+			}),
+		);
+		const result = expectSuccess(res, "session.list");
+		expect(result.sessions[0]?.title.length).toBeLessThanOrEqual(80);
+		const title = result.sessions[0]?.title ?? "";
+		expect(title).toEndWith("...");
+	});
+
+	test("session.get returns a specific session", async () => {
+		const instanceId = await createInstance();
+
+		await daemon.handleRequest(
+			req({
+				id: "submit",
+				method: "job.submit",
+				params: {
+					instanceId,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "test get" },
+				},
+			}),
+		);
+
+		await Bun.sleep(80);
+
+		const listRes = await daemon.handleRequest(
+			req({
+				id: "session-list",
+				method: "session.list",
+				params: { instanceId },
+			}),
+		);
+		const sessions = expectSuccess(listRes, "session.list").sessions;
+		const session = sessions[0];
+		if (!session) throw new Error("expected at least one session");
+
+		const getRes = await daemon.handleRequest(
+			req({
+				id: "session-get",
+				method: "session.get",
+				params: { sessionId: session.id },
+			}),
+		);
+		const result = expectSuccess(getRes, "session.get");
+		expect(result.session.id).toBe(session.id);
+		expect(result.session.title).toBe("test get");
+	});
+
+	test("job.list filters by sessionId", async () => {
+		const instanceId = await createInstance();
+
+		// Submit two jobs that create separate sessions
+		await daemon.handleRequest(
+			req({
+				id: "submit-1",
+				method: "job.submit",
+				params: {
+					instanceId,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "first session" },
+				},
+			}),
+		);
+
+		await Bun.sleep(80);
+
+		await daemon.handleRequest(
+			req({
+				id: "submit-2",
+				method: "job.submit",
+				params: {
+					instanceId,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "second session" },
+				},
+			}),
+		);
+
+		await Bun.sleep(80);
+
+		// Get all jobs — should be 2
+		const allRes = await daemon.handleRequest(
+			req({
+				id: "job-list-all",
+				method: "job.list",
+				params: { instanceId },
+			}),
+		);
+		const allJobs = expectSuccess(allRes, "job.list").jobs;
+		expect(allJobs).toHaveLength(2);
+
+		// Get the sessionId of the first job
+		const firstJob = allJobs.find(
+			(j) => j.task.type === "prompt" && j.task.prompt === "first session",
+		);
+		if (!firstJob?.sessionId) throw new Error("expected job with sessionId");
+
+		// Filter by that sessionId
+		const filteredRes = await daemon.handleRequest(
+			req({
+				id: "job-list-filtered",
+				method: "job.list",
+				params: { instanceId, sessionId: firstJob.sessionId },
+			}),
+		);
+		const filtered = expectSuccess(filteredRes, "job.list").jobs;
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0]?.sessionId).toBe(firstJob.sessionId);
+	});
+
+	test("removing an instance cascades to its sessions", async () => {
+		const instanceId = await createInstance();
+
+		await daemon.handleRequest(
+			req({
+				id: "submit",
+				method: "job.submit",
+				params: {
+					instanceId,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "doomed" },
+				},
+			}),
+		);
+
+		await Bun.sleep(80);
+
+		// Verify session exists
+		const before = await daemon.handleRequest(
+			req({
+				id: "session-list-before",
+				method: "session.list",
+				params: { instanceId },
+			}),
+		);
+		expect(expectSuccess(before, "session.list").sessions).toHaveLength(1);
+
+		// Remove the instance
+		await daemon.handleRequest(
+			req({
+				id: "instance-remove",
+				method: "instance.remove",
+				params: { instanceId },
+			}),
+		);
+
+		// Verify sessions are gone
+		const after = await daemon.handleRequest(
+			req({
+				id: "session-list-after",
+				method: "session.list",
+				params: { instanceId },
+			}),
+		);
+		expect(expectSuccess(after, "session.list").sessions).toHaveLength(0);
+	});
+});
+
 describe("Daemon streaming", () => {
 	let tmpDir: string;
 	let store: StateStore;
@@ -481,6 +725,85 @@ describe("Daemon streaming", () => {
 		const job = expectSuccess(get, "job.get").job;
 		expect(job.state).toBe("succeeded");
 		expect(job.outputText).toBe("reply:plain");
+	});
+
+	test("two instances stream independently without cross-leak", async () => {
+		registry.streamingDeltas = ["x", "y", "z"];
+		registry.deltaIntervalMs = 20;
+
+		const alpha = await daemon.handleRequest(
+			req({
+				id: "instance-alpha",
+				method: "instance.create",
+				params: { name: "Alpha", directory: "/tmp/alpha" },
+			}),
+		);
+		const beta = await daemon.handleRequest(
+			req({
+				id: "instance-beta",
+				method: "instance.create",
+				params: { name: "Beta", directory: "/tmp/beta" },
+			}),
+		);
+		const alphaInstance = expectSuccess(alpha, "instance.create").instance;
+		const betaInstance = expectSuccess(beta, "instance.create").instance;
+
+		const submitAlpha = await daemon.handleRequest(
+			req({
+				id: "submit-alpha",
+				method: "job.submit",
+				params: {
+					instanceId: alphaInstance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "alpha-prompt" },
+				},
+			}),
+		);
+		const submitBeta = await daemon.handleRequest(
+			req({
+				id: "submit-beta",
+				method: "job.submit",
+				params: {
+					instanceId: betaInstance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "beta-prompt" },
+				},
+			}),
+		);
+		const alphaJobId = expectSuccess(submitAlpha, "job.submit").job.id;
+		const betaJobId = expectSuccess(submitBeta, "job.submit").job.id;
+
+		const alphaEvents: Array<{ type: string }> = [];
+		const betaEvents: Array<{ type: string }> = [];
+		const unsubA = daemon.subscribeJob(alphaJobId, (e) => alphaEvents.push(e));
+		const unsubB = daemon.subscribeJob(betaJobId, (e) => betaEvents.push(e));
+
+		await Bun.sleep(200);
+		unsubA();
+		unsubB();
+
+		const alphaJob = expectSuccess(
+			await daemon.handleRequest(
+				req({ id: "g-a", method: "job.get", params: { jobId: alphaJobId } }),
+			),
+			"job.get",
+		).job;
+		const betaJob = expectSuccess(
+			await daemon.handleRequest(
+				req({ id: "g-b", method: "job.get", params: { jobId: betaJobId } }),
+			),
+			"job.get",
+		).job;
+
+		expect(alphaJob.outputText).toBe("xyz");
+		expect(betaJob.outputText).toBe("xyz");
+		expect(alphaEvents.some((e) => e.type === "delta")).toBe(true);
+		expect(betaEvents.some((e) => e.type === "delta")).toBe(true);
+		expect(alphaEvents[alphaEvents.length - 1]?.type).toBe("done");
+		expect(betaEvents[betaEvents.length - 1]?.type).toBe("done");
+
+		expect(registry.directoriesStarted).toContain("/tmp/alpha");
+		expect(registry.directoriesStarted).toContain("/tmp/beta");
 	});
 
 	test("late subscriber gets snapshot of accumulated text and continues without duplicates", async () => {

@@ -66,6 +66,8 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 		title?: string;
 	}> = [];
 	readonly abortCalls: Array<{ instanceId: string; sessionId: string }> = [];
+	readonly directoriesStarted: string[] = [];
+	readonly disposeCalls: Array<{ directory?: string }> = [];
 	globalMaxConcurrent = 0;
 	/** Configurable per-test: an array of text deltas the fake will emit
 	 * via the wired onEvent handler before returning the final response
@@ -89,7 +91,11 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 		this.onEvent?.(instanceId, event);
 	}
 
-	async ensureStarted(instanceId: string): Promise<ManagedOpencodeRuntime> {
+	async ensureStarted(
+		instanceId: string,
+		directory: string,
+	): Promise<ManagedOpencodeRuntime> {
+		this.directoriesStarted.push(directory);
 		const existing = this.runtimes.get(instanceId);
 		if (existing) {
 			return existing;
@@ -98,7 +104,10 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 		const runtime: ManagedOpencodeRuntime = {
 			client: {
 				instance: {
-					dispose: async () => undefined,
+					dispose: async (parameters) => {
+						this.disposeCalls.push({ directory: parameters?.directory });
+						return undefined;
+					},
 				},
 				session: {
 					create: async (parameters) => {
@@ -218,7 +227,16 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 		this.runtimes.clear();
 	}
 
-	async queryProviders(_directory?: string, _refresh?: boolean) {
+	async queryProviders(
+		directories: string[],
+		_directory?: string,
+		refresh?: boolean,
+	) {
+		if (refresh) {
+			for (const dir of directories) {
+				this.disposeCalls.push({ directory: dir });
+			}
+		}
 		return { providers: [], connected: [] };
 	}
 }

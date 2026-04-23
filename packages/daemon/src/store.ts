@@ -2,11 +2,11 @@ import type { Database, Statement } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { z } from "zod";
 
 import { openDaemonDatabase } from "./db";
 import type {
 	DaemonJob,
+	DaemonSession,
 	InstanceHealth,
 	JobSession,
 	JobState,
@@ -15,7 +15,7 @@ import type {
 	ResponseError,
 } from "./protocol";
 
-type ErrorCode = z.infer<typeof ResponseError>["code"];
+type ErrorCode = ResponseError["code"];
 
 export class StoreError extends Error {
 	constructor(
@@ -70,6 +70,15 @@ export interface JobSessionRef {
 	remoteSessionId?: string;
 }
 
+/** Row shape for sessions that already have a remote OpenCode id (public `DaemonSession.id`). */
+interface DaemonSessionRow {
+	remote_session_id: string;
+	instance_id: string;
+	title: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
 function rowToInstance(row: InstanceRow): ManagedInstance {
 	const base: ManagedInstance = {
 		id: row.id,
@@ -116,6 +125,18 @@ function rowToJob(row: JobRow): DaemonJob {
 	};
 }
 
+function rowToDaemonSession(row: DaemonSessionRow): DaemonSession {
+	const title =
+		row.title && row.title.length > 0 ? row.title : row.remote_session_id;
+	return {
+		id: row.remote_session_id,
+		instanceId: row.instance_id,
+		title,
+		createdAt: row.created_at,
+		updatedAt: row.updated_at,
+	};
+}
+
 const JOB_SELECT = `
 	SELECT j.id, j.instance_id, j.state, j.prompt, j.agent,
 	       j.model_provider_id, j.model_id, j.system_prompt, j.variant,
@@ -154,6 +175,8 @@ export class StateStore {
 				>;
 				getSessionForJob: Statement<SessionRefRow, [string]>;
 				assignRemoteSessionToJob: Statement;
+				listSessionsByInstance: Statement<DaemonSessionRow, [string]>;
+				getSessionByRemoteId: Statement<DaemonSessionRow, [string]>;
 
 				listAllJobs: Statement<JobRow>;
 				listJobsByInstance: Statement<JobRow, [string]>;
@@ -232,8 +255,21 @@ export class StateStore {
 			),
 			assignRemoteSessionToJob: db.query(
 				`UPDATE sessions
-				 SET remote_session_id = $remote_session_id, updated_at = $updated_at
+				 SET remote_session_id = $remote_session_id,
+				     title = $title,
+				     updated_at = $updated_at
 				 WHERE id = (SELECT session_id FROM jobs WHERE id = $job_id)`,
+			),
+			listSessionsByInstance: db.query<DaemonSessionRow, [string]>(
+				`SELECT remote_session_id, instance_id, title, created_at, updated_at
+				 FROM sessions
+				 WHERE instance_id = ? AND remote_session_id IS NOT NULL
+				 ORDER BY datetime(updated_at) DESC`,
+			),
+			getSessionByRemoteId: db.query<DaemonSessionRow, [string]>(
+				`SELECT remote_session_id, instance_id, title, created_at, updated_at
+				 FROM sessions
+				 WHERE remote_session_id = ?`,
 			),
 
 			listAllJobs: db.query<JobRow, []>(
@@ -477,12 +513,37 @@ export class StateStore {
 	 * the given job. Used once a new session has been created on the
 	 * remote runtime during job execution.
 	 */
-	assignRemoteSessionToJob(jobId: string, remoteSessionId: string): void {
+	assignRemoteSessionToJob(
+		jobId: string,
+		remoteSessionId: string,
+		title: string,
+	): void {
 		this.s().assignRemoteSessionToJob.run({
 			$job_id: jobId,
 			$remote_session_id: remoteSessionId,
+			$title: title,
 			$updated_at: new Date().toISOString(),
 		});
+	}
+
+	/** Sessions visible to the TUI: only rows with a resolved remote OpenCode session id. */
+	listSessions(filter: { instanceId: string }): DaemonSession[] {
+		return this.s()
+			.listSessionsByInstance.all(filter.instanceId)
+			.map(rowToDaemonSession);
+	}
+
+	getSession(remoteSessionId: string): DaemonSession | undefined {
+		const row = this.s().getSessionByRemoteId.get(remoteSessionId);
+		return row ? rowToDaemonSession(row) : undefined;
+	}
+
+	assertSession(remoteSessionId: string): DaemonSession {
+		const session = this.getSession(remoteSessionId);
+		if (!session) {
+			throw new StoreError("not_found", `session ${remoteSessionId} not found`);
+		}
+		return session;
 	}
 
 	getSessionForJob(jobId: string): JobSessionRef {
@@ -504,11 +565,13 @@ export class StateStore {
 	// --------------------------------------------------------------------
 
 	listJobs(
-		filter: { instanceId?: string; state?: JobState } = {},
+		filter: { instanceId?: string; state?: JobState; sessionId?: string } = {},
 	): DaemonJob[] {
-		const { instanceId, state } = filter;
+		const { instanceId, state, sessionId } = filter;
 		let rows: JobRow[];
-		if (instanceId && state) {
+		if (sessionId) {
+			rows = this.listJobsWithFilters({ instanceId, state, sessionId });
+		} else if (instanceId && state) {
 			rows = this.s().listJobsByInstanceAndState.all(instanceId, state);
 		} else if (instanceId) {
 			rows = this.s().listJobsByInstance.all(instanceId);
@@ -518,6 +581,32 @@ export class StateStore {
 			rows = this.s().listAllJobs.all();
 		}
 		return rows.map(rowToJob);
+	}
+
+	private listJobsWithFilters(filter: {
+		instanceId?: string;
+		state?: JobState;
+		sessionId: string;
+	}): JobRow[] {
+		const db = this.db;
+		if (!db) {
+			throw new Error("StateStore is not open; call open() first");
+		}
+		const conditions: string[] = [];
+		const params: Array<string | JobState> = [];
+		if (filter.instanceId) {
+			conditions.push("j.instance_id = ?");
+			params.push(filter.instanceId);
+		}
+		if (filter.state) {
+			conditions.push("j.state = ?");
+			params.push(filter.state);
+		}
+		conditions.push("s.remote_session_id = ?");
+		params.push(filter.sessionId);
+		const where = `WHERE ${conditions.join(" AND ")}`;
+		const sql = `${JOB_SELECT} ${where} ORDER BY datetime(j.created_at) DESC`;
+		return db.query<JobRow, Array<string | JobState>>(sql).all(...params);
 	}
 
 	getJob(id: string): DaemonJob | undefined {
