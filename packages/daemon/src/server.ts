@@ -557,7 +557,7 @@ export class Daemon {
 	private async handleSessionDiffs(
 		request: RequestByMethod<"session.diffs">,
 	): Promise<SessionDiffsResult> {
-		const instance = this.store.assertInstance(request.params.instanceId);
+		const instance = await this.startInstance(request.params.instanceId);
 		const runtime = await this.registry.ensureStarted(
 			instance.id,
 			instance.directory,
