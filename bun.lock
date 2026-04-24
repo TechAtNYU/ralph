@@ -69,7 +69,7 @@
       "name": "@techatnyu/ralphd",
       "version": "0.0.0",
       "dependencies": {
-        "@opencode-ai/sdk": "^1.2.10",
+        "@opencode-ai/sdk": "1.14.22",
         "zod": "^4.3.6",
       },
       "devDependencies": {
@@ -346,7 +346,7 @@
 
     "@oozcitak/util": ["@oozcitak/util@10.0.0", "", {}, "sha512-hAX0pT/73190NLqBPPWSdBVGtbY6VOhWYK3qqHqtXQ1gK7kS2yz4+ivsN07hpJ6I3aeMtKP6J6npsEKOAzuTLA=="],
 
-    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.3.13", "", {}, "sha512-/M6HlNnba+xf1EId6qFb2tG0cvq0db3PCQDug1glrf8wYOU57LYNF8WvHX9zoDKPTMv0F+O4pcP/8J+WvDaxHA=="],
+    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.14.22", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-1PjkrZRAwm9ocfTwOleP/e31HYtLVODb2E1hYTRHMmvF2rmAdCm7lztguYVkAPn/B6koGpFvhslTQH7j+38Fjw=="],
 
     "@opentui/core": ["@opentui/core@0.1.95", "", { "dependencies": { "bun-ffi-structs": "0.1.2", "diff": "8.0.2", "jimp": "1.6.0", "marked": "17.0.1", "yoga-layout": "3.2.1" }, "optionalDependencies": { "@dimforge/rapier2d-simd-compat": "^0.17.3", "@opentui/core-darwin-arm64": "0.1.95", "@opentui/core-darwin-x64": "0.1.95", "@opentui/core-linux-arm64": "0.1.95", "@opentui/core-linux-x64": "0.1.95", "@opentui/core-win32-arm64": "0.1.95", "@opentui/core-win32-x64": "0.1.95", "bun-webgpu": "0.1.5", "planck": "^1.4.2", "three": "0.177.0" }, "peerDependencies": { "web-tree-sitter": "0.25.10" } }, "sha512-Ha73I+PPSy6Jk8CTZgdGRHU+nnmrPAs7m6w0k6ge1/kWbcNcZB0lY67sWQMdoa6bSINQMNWg7SjbNCC9B/0exg=="],
 
@@ -1554,6 +1554,8 @@
 
     "@tanstack/start-plugin-core/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
+    "@techatnyu/ralphd/@types/bun": ["@types/bun@1.3.13", "", { "dependencies": { "bun-types": "1.3.13" } }, "sha512-9fqXWk5YIHGGnUau9TEi+qdlTYDAnOj+xLCmSTwXfAIqXr2x4tytJb43E9uCvt09zJURKXwAtkoH4nLQfzeTXw=="],
+
     "anymatch/picomatch": ["picomatch@2.3.2", "", {}, "sha512-V7+vQEJ06Z+c5tSye8S+nHUfI51xoXIXjHQ99cQtKUkQqqO1kO/KCJUfZXuB47h/YBlDhah2H3hdUGXn8ie0oA=="],
 
     "docs/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
@@ -1601,6 +1603,8 @@
     "@tanstack/router-plugin/chokidar/readdirp": ["readdirp@3.6.0", "", { "dependencies": { "picomatch": "^2.2.1" } }, "sha512-hOS089on8RduqdbhvQ5Z37A0ESjsqz6qnRcffsMU3495FuTdqSm+7bhJ29JvIOsBDEEnan5DPu9t3To9VRlMzA=="],
 
     "@tanstack/start-plugin-core/@tanstack/router-utils/diff": ["diff@8.0.4", "", {}, "sha512-DPi0FmjiSU5EvQV0++GFDOJ9ASQUVFh5kD+OzOnYdi7n3Wpm9hWWGfB/O2blfHcMVTL5WkQXSnRiK9makhrcnw=="],
+
+    "@techatnyu/ralphd/@types/bun/bun-types": ["bun-types@1.3.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA=="],
 
     "fumadocs-mdx/esbuild/@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.27.4", "", { "os": "aix", "cpu": "ppc64" }, "sha512-cQPwL2mp2nSmHHJlCyoXgHGhbEPMrEEU5xhkcy3Hs/O7nGZqEpZ2sUtLaL9MORLtDfRvVl2/3PAuEkYZH0Ty8Q=="],
 

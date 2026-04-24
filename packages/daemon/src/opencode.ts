@@ -8,7 +8,15 @@ import {
 } from "@opencode-ai/sdk/v2";
 
 export interface OpencodeSessionClient {
-	create(parameters: { directory?: string; title?: string }): Promise<Session>;
+	create(parameters: {
+		directory?: string;
+		title?: string;
+		permission?: Array<{
+			permission: string;
+			pattern: string;
+			action: "allow" | "deny" | "ask";
+		}>;
+	}): Promise<Session>;
 	prompt(parameters: {
 		sessionID: string;
 		directory?: string;
@@ -46,6 +54,14 @@ export interface ProviderListResult {
 	providers: Provider[];
 	connected: string[];
 }
+
+type RawProviderModel = ProviderModel & {
+	capabilities?: {
+		attachment?: boolean;
+		reasoning?: boolean;
+		toolcall?: boolean;
+	};
+};
 
 export interface OpencodeRuntimeClient {
 	session: OpencodeSessionClient;
@@ -179,17 +195,21 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 									id: p.id,
 									name: p.name,
 									models: Object.fromEntries(
-										Object.entries(p.models).map(([k, m]) => [
-											k,
-											{
-												id: m.id,
-												name: m.name,
-												family: m.family,
-												attachment: m.attachment,
-												reasoning: m.reasoning,
-												tool_call: m.tool_call,
-											},
-										]),
+										Object.entries(p.models).map(([k, rawModel]) => {
+											const m = rawModel as RawProviderModel;
+											return [
+												k,
+												{
+													id: m.id,
+													name: m.name,
+													family: m.family,
+													attachment:
+														m.attachment ?? m.capabilities?.attachment,
+													reasoning: m.reasoning ?? m.capabilities?.reasoning,
+													tool_call: m.tool_call ?? m.capabilities?.toolcall,
+												},
+											];
+										}),
 									),
 								})),
 								connected: response.data.connected,

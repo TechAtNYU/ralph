@@ -46,11 +46,19 @@ const JobTask = z.discriminatedUnion("type", [
 ]);
 export type JobTask = z.infer<typeof JobTask>;
 
+const PermissionRule = z.strictObject({
+	permission: z.string().min(1),
+	pattern: z.string().min(1),
+	action: z.enum(["allow", "deny", "ask"]),
+});
+export type PermissionRule = z.infer<typeof PermissionRule>;
+
 /** Whether the job starts a new conversation or continues an existing one. */
 const JobSession = z.discriminatedUnion("type", [
 	z.strictObject({
 		type: z.literal("new"),
 		title: z.string().min(1).optional(),
+		permission: z.array(PermissionRule).optional(),
 	}),
 	z.strictObject({
 		type: z.literal("existing"),
