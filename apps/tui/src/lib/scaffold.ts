@@ -53,3 +53,27 @@ export async function bootstrapSessionScaffold(
 
 	return sessionPath;
 }
+
+export interface InstanceScaffoldOptions {
+	instanceId: string;
+	ralphHome?: string;
+}
+
+export function resolveInstanceScaffoldPath(
+	options: InstanceScaffoldOptions,
+): string {
+	assertValidSegment(options.instanceId, "instanceId");
+
+	const ralphHome =
+		options.ralphHome ?? resolveDaemonPaths(process.env).ralphHome;
+
+	return join(ralphHome, "sessions", options.instanceId, "plan");
+}
+
+export async function bootstrapInstanceScaffold(
+	options: InstanceScaffoldOptions,
+): Promise<string> {
+	const scaffoldPath = resolveInstanceScaffoldPath(options);
+	await mkdir(scaffoldPath, { recursive: true });
+	return scaffoldPath;
+}

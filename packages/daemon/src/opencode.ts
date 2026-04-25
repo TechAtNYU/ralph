@@ -1,3 +1,4 @@
+import { createServer } from "node:net";
 import {
 	type AssistantMessage,
 	createOpencode,
@@ -117,6 +118,22 @@ interface InstanceSubscription {
 	cancel(): void;
 }
 
+function findFreePort(): Promise<number> {
+	return new Promise((resolve, reject) => {
+		const srv = createServer();
+		srv.listen(0, "127.0.0.1", () => {
+			const addr = srv.address();
+			if (typeof addr === "object" && addr) {
+				const port = addr.port;
+				srv.close(() => resolve(port));
+			} else {
+				srv.close(() => reject(new Error("Failed to get port")));
+			}
+		});
+		srv.on("error", reject);
+	});
+}
+
 export class OpencodeRegistry implements OpencodeRuntimeManager {
 	private shared?: SharedRuntime;
 	private sharedStarting?: Promise<SharedRuntime>;
@@ -176,44 +193,53 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 								responseStyle: "data",
 							});
 							return res as unknown as {
-								info: AssistantMessage;
-								parts: Part[];
+								info?: AssistantMessage;
+								parts?: Part[];
 							};
 						},
 						abort: (parameters) =>
 							client.session.abort(parameters, {
 								throwOnError: true,
 							}),
-					},
-					provider: {
-						list: async (parameters) => {
-							const response = await client.provider.list(parameters, {
-								throwOnError: true,
-							});
-							return {
-								providers: response.data.all.map((p) => ({
-									id: p.id,
-									name: p.name,
-									models: Object.fromEntries(
-										Object.entries(p.models).map(([k, rawModel]) => {
-											const m = rawModel as RawProviderModel;
-											return [
-												k,
-												{
-													id: m.id,
-													name: m.name,
-													family: m.family,
-													attachment:
-														m.attachment ?? m.capabilities?.attachment,
-													reasoning: m.reasoning ?? m.capabilities?.reasoning,
-													tool_call: m.tool_call ?? m.capabilities?.toolcall,
-												},
-											];
-										}),
-									),
-								})),
-								connected: response.data.connected,
-							};
+						},
+						provider: {
+							list: async (parameters) => {
+								const response = await client.provider.list(parameters, {
+									throwOnError: true,
+								});
+								return {
+									providers: response.data.all.map((p) => ({
+										id: p.id,
+										name: p.name,
+										models: Object.fromEntries(
+											Object.entries(p.models).map(([k, rawModel]) => {
+												const m = rawModel as RawProviderModel;
+												return [
+													k,
+													{
+														id: m.id,
+														name: m.name,
+														family: m.family,
+														attachment:
+															m.attachment ?? m.capabilities?.attachment,
+														reasoning: m.reasoning ?? m.capabilities?.reasoning,
+														tool_call: m.tool_call ?? m.capabilities?.toolcall,
+													},
+												];
+											}),
+										),
+									})),
+									connected: response.data.connected,
+								};
+							},
+						},
+						async ping() {
+							try {
+								await client.path.get({}, { throwOnError: true });
+								return true;
+							} catch {
+								return false;
+							}
 						},
 					},
 					async ping() {

@@ -386,6 +386,7 @@ const RequestMethod = z.enum([
 	"job.get",
 	"job.cancel",
 	"job.stream",
+	"job.submit_and_stream",
 ]);
 export type RequestMethod = z.infer<typeof RequestMethod>;
 
@@ -495,6 +496,12 @@ const JobStreamRequest = z.strictObject({
 	params: JobStreamParams,
 });
 
+const JobSubmitAndStreamRequest = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("job.submit_and_stream"),
+	params: JobSubmitParams,
+});
+
 /** Union of every valid request the daemon accepts. */
 export const RequestMessage = z.discriminatedUnion("method", [
 	DaemonHealthRequest,
@@ -513,6 +520,7 @@ export const RequestMessage = z.discriminatedUnion("method", [
 	JobGetRequest,
 	JobCancelRequest,
 	JobStreamRequest,
+	JobSubmitAndStreamRequest,
 ]);
 export type RequestMessage = z.infer<typeof RequestMessage>;
 
@@ -642,6 +650,13 @@ const JobStreamSuccess = z.strictObject({
 	result: StreamAckResult,
 });
 
+const JobSubmitAndStreamSuccess = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("job.submit_and_stream"),
+	ok: z.literal(true),
+	result: SubmitResult,
+});
+
 // Error response
 
 const ErrorResponse = z.strictObject({
@@ -670,6 +685,7 @@ export const ResponseMessage = z.union([
 	JobGetSuccess,
 	JobCancelSuccess,
 	JobStreamSuccess,
+	JobSubmitAndStreamSuccess,
 	ErrorResponse,
 ]);
 export type ResponseMessage = z.infer<typeof ResponseMessage>;

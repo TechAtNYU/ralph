@@ -70,3 +70,6 @@ React components rendered in the terminal via @opentui/react. Real-time job moni
 - `RALPH_HOME` — Base directory (default: `~/.ralph`, dev: `./.ralph-dev`)
 - `RALPHD_MAX_CONCURRENCY` — Max concurrent jobs per instance (default: 4)
 - `RALPHD_BIN` — Override daemon binary path
+
+## Git Conventions
+- Reasonably Commit after every fix.

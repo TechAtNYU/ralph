@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import type {
@@ -107,18 +105,28 @@ export function ExecuteView({
 	}, [refresh]);
 
 	const handleStart = useCallback(async () => {
-		if (starting) return;
+		if (starting || !planData.hasPrd || planData.tasks.length === 0) return;
 		setStarting(true);
 		setStartMessage(undefined);
 		setError(undefined);
 		try {
-			const cwd = process.cwd();
-			const promptPath = join(cwd, ".ralph", "PROMPT.md");
-			const promptContent = (await readFile(promptPath, "utf-8")).trim();
-			if (!promptContent) {
-				throw new Error("PROMPT.md is empty");
+			const pendingTasks = planData.tasks.filter((t) => !t.passed);
+			if (pendingTasks.length === 0) {
+				throw new Error("All tasks are already completed");
 			}
+			const task = pendingTasks[0] as (typeof pendingTasks)[number];
+			const lines = [
+				task.description,
+				"",
+				"Subtasks:",
+				...task.subtasks.map((s) => `- ${s}`),
+			];
+			if (task.notes) {
+				lines.push("", `Notes: ${task.notes}`);
+			}
+			const prompt = lines.join("\n");
 
+			const cwd = process.cwd();
 			const { instances } = await daemon.listInstances();
 			let instance = instances.find((i) => i.directory === cwd);
 			if (!instance) {
@@ -134,7 +142,7 @@ export function ExecuteView({
 				session: { type: "new" },
 				task: {
 					type: "prompt",
-					prompt: promptContent,
+					prompt,
 				},
 			});
 
@@ -149,7 +157,7 @@ export function ExecuteView({
 		} finally {
 			setStarting(false);
 		}
-	}, [refresh, starting]);
+	}, [refresh, starting, planData.hasPrd, planData.tasks]);
 
 	useKeyboard((key) => {
 		if (!focused) return;
@@ -159,7 +167,7 @@ export function ExecuteView({
 			return;
 		}
 
-		if (key.name === "s" && planData.hasPrompt && !starting) {
+		if (key.name === "s" && planData.hasPrd && !starting) {
 			void handleStart();
 			return;
 		}
@@ -188,7 +196,7 @@ export function ExecuteView({
 	});
 
 	const selected = data?.instances[selectedIndex];
-	const planReady = planData.hasPrompt;
+	const planReady = planData.hasPrd && planData.tasks.length > 0;
 
 	return (
 		<box flexDirection="column" flexGrow={1}>
@@ -219,7 +227,7 @@ export function ExecuteView({
 					</>
 				) : (
 					<text attributes={TextAttributes.DIM}>
-						Complete spec, prd, and prompt in Plan view to enable execution
+						Complete spec and prd in Plan view to enable execution
 					</text>
 				)}
 				<box flexGrow={1} />

@@ -3,6 +3,7 @@ import { useKeyboard } from "@opentui/react";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useState } from "react";
 import { usePlanFiles } from "../hooks/use-plan-files";
+import { usePlanInstance } from "../hooks/use-plan-instance";
 import { Chat } from "./chat";
 import { ExecuteView } from "./execute-view";
 import { HelpOverlay } from "./help-overlay";
@@ -33,7 +34,8 @@ export function App({ onQuit }: AppProps) {
 	const [daemonOnline, setDaemonOnline] = useState(true);
 	const [showHelp, setShowHelp] = useState(false);
 	const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
-	const planFiles = usePlanFiles();
+	const planInstance = usePlanInstance();
+	const planFiles = usePlanFiles(planInstance.scaffoldPath);
 
 	const checkDaemon = useCallback(async () => {
 		try {
@@ -127,21 +129,20 @@ export function App({ onQuit }: AppProps) {
 
 			<box flexDirection="column" flexGrow={1} marginTop={1}>
 				<box
+					visible={activeTab === 0}
 					flexGrow={activeTab === 0 ? 1 : 0}
-					overflow={activeTab === 0 ? "visible" : "hidden"}
-					height={activeTab === 0 ? undefined : 0}
 					flexDirection="column"
 				>
 					<PlanView
 						focused={contentFocused && activeTab === 0}
 						planData={planFiles.data}
 						daemonOnline={daemonOnline}
+						planInstance={planInstance}
 					/>
 				</box>
 				<box
+					visible={activeTab === 1}
 					flexGrow={activeTab === 1 ? 1 : 0}
-					overflow={activeTab === 1 ? "visible" : "hidden"}
-					height={activeTab === 1 ? undefined : 0}
 					flexDirection="column"
 				>
 					<ExecuteView
@@ -153,9 +154,8 @@ export function App({ onQuit }: AppProps) {
 					/>
 				</box>
 				<box
+					visible={activeTab === 2}
 					flexGrow={activeTab === 2 ? 1 : 0}
-					overflow={activeTab === 2 ? "visible" : "hidden"}
-					height={activeTab === 2 ? undefined : 0}
 					flexDirection="column"
 				>
 					<ReviewView />

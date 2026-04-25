@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { SyntaxStyle, TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { useMemo, useState } from "react";
-import type { ChatMessage, ChatMode } from "../hooks/use-chat";
+import type { ChatMessage } from "../hooks/use-chat";
 import { useFileSearch } from "../hooks/use-file-search";
-import type { PlanFilesData } from "../hooks/use-plan-files";
+import type { Skill } from "../skills";
 import { CommandPalette, filterCommands } from "./command-palette";
 import { FILE_PICKER_VISIBLE_COUNT, FilePicker } from "./file-picker";
 import { WelcomeScreen } from "./welcome-screen";
@@ -15,20 +15,13 @@ interface PlanChatProps {
 	messages: ChatMessage[];
 	loading: boolean;
 	error: string | undefined;
-	planData: PlanFilesData;
 	daemonOnline: boolean;
-	onSend: (prompt: string, mode: ChatMode) => Promise<void>;
+	onSendPrompt: (prompt: string) => Promise<void>;
 	onToggleTasks: () => void;
 	onClear: () => void;
-	onSetMode: (mode: ChatMode) => void;
-	mode: ChatMode;
+	onStartSkill: (id: "spec" | "prd") => void;
+	skill: Skill | undefined;
 }
-
-const MODE_LABELS: Record<ChatMode, string> = {
-	"create-spec": "Spec",
-	"create-prd": "PRD",
-	"create-prompt": "Prompt",
-};
 
 function extractFileQuery(input: string): string | null {
 	const lastAt = input.lastIndexOf("@");
@@ -51,13 +44,12 @@ export function PlanChat({
 	messages,
 	loading,
 	error,
-	planData,
 	daemonOnline,
-	onSend,
+	onSendPrompt,
 	onToggleTasks,
 	onClear,
-	onSetMode,
-	mode,
+	onStartSkill,
+	skill,
 }: PlanChatProps) {
 	const [inputValue, setInputValue] = useState("");
 	const [fileRefs, setFileRefs] = useState<string[]>([]);
@@ -73,18 +65,6 @@ export function PlanChat({
 	const visibleFiles = fileResults.slice(0, FILE_PICKER_VISIBLE_COUNT);
 	const filteredCommands = filterCommands(commandQuery);
 
-	const COMMAND_MODES: Record<string, { mode: ChatMode; fallback: string }> = {
-		"/spec": {
-			mode: "create-spec",
-			fallback: "Create a spec for this project",
-		},
-		"/prd": { mode: "create-prd", fallback: "Break the spec into tasks" },
-		"/prompt": {
-			mode: "create-prompt",
-			fallback: "Generate the execution prompt",
-		},
-	};
-
 	useKeyboard((key) => {
 		if (!focused) return;
 		if (key.name === "t" && key.ctrl) {
@@ -95,6 +75,14 @@ export function PlanChat({
 			const cmd = filteredCommands[idx];
 			if (cmd) {
 				setInputValue(`${cmd.name} `);
+				setPickerIndex(0);
+			}
+		}
+		if (key.name === "tab" && showFilePicker) {
+			const idx = Math.min(pickerIndex, visibleFiles.length - 1);
+			const file = visibleFiles[idx];
+			if (file) {
+				handleFileSelect(file);
 				setPickerIndex(0);
 			}
 		}
@@ -133,7 +121,12 @@ export function PlanChat({
 		return `${text}${fileContents}`;
 	};
 
-	const executeCommand = (cmdName: string, rest: string) => {
+	const executeCommand = (cmdName: string) => {
+		if (cmdName === "/spec" || cmdName === "/prd") {
+			onStartSkill(cmdName.slice(1) as "spec" | "prd");
+			setInputValue("");
+			return;
+		}
 		if (cmdName === "/tasks") {
 			onToggleTasks();
 			setInputValue("");
@@ -144,21 +137,13 @@ export function PlanChat({
 			setInputValue("");
 			return;
 		}
-		const config = COMMAND_MODES[cmdName];
-		if (config) {
-			onSetMode(config.mode);
-			const prompt = buildPrompt(rest || config.fallback);
-			setInputValue("");
-			setFileRefs([]);
-			void onSend(prompt, config.mode);
-		}
 	};
 
 	const handleSubmit = (value: string) => {
 		if (showCommandPalette && !showFilePicker) {
 			const idx = Math.min(pickerIndex, filteredCommands.length - 1);
 			const cmd = filteredCommands[idx];
-			if (cmd) executeCommand(cmd.name, "");
+			if (cmd) executeCommand(cmd.name);
 			return;
 		}
 
@@ -175,44 +160,65 @@ export function PlanChat({
 		if (trimmed.startsWith("/")) {
 			const spaceIdx = trimmed.indexOf(" ");
 			const cmdName = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
-			const rest = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
-			executeCommand(cmdName, rest);
+			executeCommand(cmdName);
 			return;
 		}
+
+		if (!skill) return;
 
 		const prompt = buildPrompt(trimmed);
 		setInputValue("");
 		setFileRefs([]);
-		void onSend(prompt, mode);
+		void onSendPrompt(prompt);
 	};
+
+	const placeholder = !skill
+		? "Type /spec or /prd to start..."
+		: loading
+			? "Waiting for response..."
+			: skill.inputPlaceholder;
 
 	return (
 		<box flexDirection="column" flexGrow={1}>
 			<scrollbox flexGrow={1} flexShrink={1} minHeight={0} stickyScroll={true}>
 				{messages.length === 0 && !loading ? (
-					<WelcomeScreen planData={planData} />
+					<WelcomeScreen skill={skill} />
 				) : (
-					messages.map((msg: ChatMessage, index: number) => (
-						<box
-							// biome-ignore lint/suspicious/noArrayIndexKey: append-only message list
-							key={`msg-${index}`}
-							flexDirection="column"
-							marginBottom={1}
-							paddingLeft={2}
-						>
-							<text
-								fg={msg.role === "user" ? "brightWhite" : "cyan"}
-								attributes={TextAttributes.BOLD}
+					messages.map((msg: ChatMessage, index: number) =>
+						msg.role === "system" ? (
+							<box
+								// biome-ignore lint/suspicious/noArrayIndexKey: append-only message list
+								key={`msg-${index}`}
+								marginBottom={1}
+								paddingLeft={2}
+								paddingRight={2}
 							>
-								{msg.role === "user" ? "You" : "Assistant"}
-							</text>
-							{msg.role === "assistant" ? (
-								<markdown content={msg.content} syntaxStyle={syntaxStyle} />
-							) : (
-								<text>{msg.content}</text>
-							)}
-						</box>
-					))
+								<text fg="yellow" attributes={TextAttributes.DIM}>
+									{`— ${msg.content} —`}
+								</text>
+							</box>
+						) : (
+							<box
+								// biome-ignore lint/suspicious/noArrayIndexKey: append-only message list
+								key={`msg-${index}`}
+								flexDirection="column"
+								marginBottom={1}
+								paddingLeft={2}
+							>
+								<text
+									fg={msg.role === "user" ? "brightWhite" : "cyan"}
+									attributes={TextAttributes.BOLD}
+								>
+									{msg.role === "user" ? "You" : "Assistant"}
+								</text>
+								{msg.role === "assistant" ? (
+									<markdown content={msg.content} syntaxStyle={syntaxStyle} />
+								) : (
+									<text>{msg.content}</text>
+								)}
+							</box>
+						),
+					)
 				)}
 				{loading && (
 					<box marginBottom={1} paddingLeft={2}>
@@ -266,18 +272,18 @@ export function PlanChat({
 					<input
 						focused={focused}
 						value={inputValue}
-						placeholder={
-							loading ? "Waiting for response..." : "Type a message..."
-						}
+						placeholder={placeholder}
 						onInput={handleInputChange}
 						onChange={handleInputChange}
 						// biome-ignore lint/suspicious/noExplicitAny: OpenTUI intersection type requires cast
 						onSubmit={handleSubmit as any}
 						flexGrow={1}
 					/>
-					<text attributes={TextAttributes.DIM} fg="cyan">
-						{` ${MODE_LABELS[mode]} `}
-					</text>
+					{skill && (
+						<text attributes={TextAttributes.DIM} fg="cyan">
+							{` ${skill.name} `}
+						</text>
+					)}
 				</box>
 			</box>
 		</box>

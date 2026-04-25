@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	bootstrapInstanceScaffold,
 	bootstrapSessionScaffold,
+	resolveInstanceScaffoldPath,
 	resolveSessionScaffoldPath,
 } from "./scaffold";
 
@@ -99,5 +101,50 @@ describe("scaffold", () => {
 		expect(prompt).toContain("RALPH_TASK_COMPLETE");
 		expect(JSON.parse(prd)).toEqual({ tasks: [] });
 		expect(progress.trim()).toBe("# Progress Log");
+	});
+
+	it("resolves the instance scaffold path under sessions/<id>/plan", () => {
+		expect(
+			resolveInstanceScaffoldPath({
+				instanceId: "instance-9",
+				ralphHome: "/tmp/ralph-home",
+			}),
+		).toBe("/tmp/ralph-home/sessions/instance-9/plan");
+	});
+
+	it("rejects invalid instance ids", () => {
+		expect(() =>
+			resolveInstanceScaffoldPath({
+				instanceId: "",
+				ralphHome: "/tmp/ralph-home",
+			}),
+		).toThrow("instanceId is required");
+
+		expect(() =>
+			resolveInstanceScaffoldPath({
+				instanceId: "a/b",
+				ralphHome: "/tmp/ralph-home",
+			}),
+		).toThrow("instanceId must not contain path separators");
+	});
+
+	it("creates the instance scaffold directory idempotently", async () => {
+		const tempHome = await mkdtemp(join(tmpdir(), "ralph-instance-scaffold-"));
+		tempDirs.push(tempHome);
+
+		const first = await bootstrapInstanceScaffold({
+			instanceId: "instance-10",
+			ralphHome: tempHome,
+		});
+		expect(first).toBe(join(tempHome, "sessions", "instance-10", "plan"));
+
+		const info = await stat(first);
+		expect(info.isDirectory()).toBe(true);
+
+		const second = await bootstrapInstanceScaffold({
+			instanceId: "instance-10",
+			ralphHome: tempHome,
+		});
+		expect(second).toBe(first);
 	});
 });

@@ -1,143 +1,147 @@
-import { daemon } from "@techatnyu/ralphd";
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-	CREATE_PRD_SYSTEM_PROMPT,
-	CREATE_PROMPT_SYSTEM_PROMPT,
-	CREATE_SPEC_SYSTEM_PROMPT,
-} from "../skills";
-
-export type ChatMode = "create-spec" | "create-prd" | "create-prompt";
+import { daemon, type PermissionRule } from "@techatnyu/ralphd";
+import { useCallback, useRef, useState } from "react";
+import { createPromptTask } from "../lib/prompt-task";
+import { ralphStore } from "../lib/store";
 
 export interface ChatMessage {
-	role: "user" | "assistant";
+	role: "user" | "assistant" | "system";
 	content: string;
+}
+
+export interface SendOptions {
+	prompt: string;
+	systemPrompt: string;
+	permission?: PermissionRule[];
 }
 
 interface UseChatReturn {
 	messages: ChatMessage[];
 	loading: boolean;
 	error: string | undefined;
-	send: (prompt: string, mode: ChatMode) => Promise<void>;
+	send: (options: SendOptions) => Promise<void>;
+	addSystemMessage: (content: string) => void;
+	resetSession: () => void;
 	clear: () => void;
 }
-
-const SKILL_PROMPTS: Record<ChatMode, string> = {
-	"create-spec": CREATE_SPEC_SYSTEM_PROMPT,
-	"create-prd": CREATE_PRD_SYSTEM_PROMPT,
-	"create-prompt": CREATE_PROMPT_SYSTEM_PROMPT,
-};
-
-const POLL_INTERVAL_MS = 1000;
-const POLL_TIMEOUT_MS = 2 * 60 * 1000;
 
 export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string>();
 	const sessionIdRef = useRef<string | null>(null);
-	const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+	const cancelledRef = useRef(false);
 
-	const stopPolling = useCallback(() => {
-		if (pollingRef.current) {
-			clearInterval(pollingRef.current);
-			pollingRef.current = null;
-		}
+	const addSystemMessage = useCallback((content: string) => {
+		setMessages((prev) => [...prev, { role: "system", content }]);
 	}, []);
 
-	useEffect(() => {
-		return () => stopPolling();
-	}, [stopPolling]);
+	const resetSession = useCallback(() => {
+		sessionIdRef.current = null;
+	}, []);
+
+	const updateLastMessage = useCallback(
+		(updater: (msg: ChatMessage) => ChatMessage) => {
+			setMessages((prev) => {
+				const next = [...prev];
+				const last = next[next.length - 1];
+				if (last) next[next.length - 1] = updater(last);
+				return next;
+			});
+		},
+		[],
+	);
 
 	const send = useCallback(
-		async (prompt: string, mode: ChatMode) => {
+		async ({ prompt, systemPrompt, permission }: SendOptions) => {
 			if (loading) return;
 
 			setMessages((prev) => [...prev, { role: "user", content: prompt }]);
 			setLoading(true);
 			setError(undefined);
+			cancelledRef.current = false;
 
 			try {
 				const instanceId = await ensureInstance();
 
 				const session = sessionIdRef.current
 					? { type: "existing" as const, sessionId: sessionIdRef.current }
-					: { type: "new" as const, title: `Plan: ${mode}` };
+					: { type: "new" as const, title: "Plan", permission };
 
-				const { job } = await daemon.submitJob({
+				const { model: storedModel } = await ralphStore.read();
+				const { events } = await daemon.submitAndStreamJob({
 					instanceId,
 					session,
 					task: {
-						type: "prompt",
-						prompt,
-						system: SKILL_PROMPTS[mode],
+						...createPromptTask({ prompt, storedModel }),
+						system: systemPrompt,
 					},
 				});
 
-				const pollStartedAt = Date.now();
+				setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+				let content = "";
 
-				const pollOnce = async (): Promise<boolean> => {
-					if (Date.now() - pollStartedAt > POLL_TIMEOUT_MS) {
-						stopPolling();
-						setError("Request timed out");
-						setLoading(false);
-						return true;
-					}
+				for await (const event of events) {
+					if (cancelledRef.current) break;
 
-					try {
-						const { job: updated } = await daemon.getJob(job.id);
-
-						if (updated.state === "succeeded") {
-							stopPolling();
-							if (updated.sessionId) {
-								sessionIdRef.current = updated.sessionId;
-							}
-							setMessages((prev) => [
-								...prev,
-								{
-									role: "assistant",
-									content: updated.outputText ?? "(no response)",
-								},
-							]);
-							setLoading(false);
-							return true;
+					if (event.type === "snapshot") {
+						content = event.text;
+						updateLastMessage(() => ({ role: "assistant", content }));
+					} else if (event.type === "delta" && event.field === "text") {
+						content += event.delta;
+						updateLastMessage(() => ({ role: "assistant", content }));
+					} else if (event.type === "done") {
+						if (event.job.sessionId) {
+							sessionIdRef.current = event.job.sessionId;
 						}
-						if (updated.state === "failed" || updated.state === "cancelled") {
-							stopPolling();
-							setError(updated.error ?? "Job failed");
-							setLoading(false);
-							return true;
+						if (event.job.state === "failed") {
+							const message = event.job.error || "Job failed";
+							setError(message);
+							updateLastMessage(() => ({
+								role: "system",
+								content: `Error: ${message}`,
+							}));
+							break;
 						}
-						return false;
-					} catch (pollError) {
-						stopPolling();
-						setError(
-							pollError instanceof Error ? pollError.message : "Polling failed",
-						);
-						setLoading(false);
-						return true;
+						if (!content.trim()) {
+							const final = event.job.outputText?.trim() || "(empty response)";
+							updateLastMessage(() => ({
+								role: "assistant",
+								content: final,
+							}));
+						}
+						break;
+					} else if (event.type === "error") {
+						setError(event.error);
+						updateLastMessage(() => ({
+							role: "system",
+							content: `Error: ${event.error}`,
+						}));
+						break;
 					}
-				};
-
-				const done = await pollOnce();
-				if (!done) {
-					pollingRef.current = setInterval(
-						() => void pollOnce(),
-						POLL_INTERVAL_MS,
-					);
 				}
 			} catch (e) {
 				setError(e instanceof Error ? e.message : "Failed to submit message");
+			} finally {
 				setLoading(false);
 			}
 		},
-		[loading, ensureInstance, stopPolling],
+		[loading, ensureInstance, updateLastMessage],
 	);
 
 	const clear = useCallback(() => {
+		cancelledRef.current = true;
 		setMessages([]);
 		sessionIdRef.current = null;
 		setError(undefined);
 	}, []);
 
-	return { messages, loading, error, send, clear };
+	return {
+		messages,
+		loading,
+		error,
+		send,
+		addSystemMessage,
+		resetSession,
+		clear,
+	};
 }

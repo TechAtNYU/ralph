@@ -1,14 +1,17 @@
 import { TextAttributes } from "@opentui/core";
 import type { PlanFilesData } from "../hooks/use-plan-files";
+import type { ActiveSkill } from "../skills";
 
 interface ContextSidebarProps {
 	planData: PlanFilesData;
 	messageCount: number;
+	activeSkill: ActiveSkill;
 }
 
 export function ContextSidebar({
 	planData,
 	messageCount,
+	activeSkill,
 }: ContextSidebarProps) {
 	const doneCount = planData.tasks.filter((t) => t.passed).length;
 
@@ -21,18 +24,46 @@ export function ContextSidebar({
 			flexDirection="column"
 			flexShrink={0}
 		>
-			<text attributes={TextAttributes.BOLD}>Plan Status</text>
-			<text fg={planData.hasSpec ? "green" : "#666666"}>
-				{planData.hasSpec ? "✓ SPEC.md" : "○ No spec"}
+			<text attributes={TextAttributes.BOLD}>Skill</text>
+			<text fg={activeSkill ? "cyan" : "#666666"}>
+				{activeSkill ? activeSkill.toUpperCase() : "None"}
 			</text>
-			<text fg={planData.hasPrd ? "green" : "#666666"}>
-				{planData.hasPrd ? "✓ prd.json" : "○ No PRD"}
+
+			<text attributes={TextAttributes.BOLD} marginTop={1}>
+				Artifacts
 			</text>
-			<text fg={planData.hasPrompt ? "green" : "#666666"}>
-				{planData.hasPrompt ? "✓ PROMPT.md" : "○ No prompt"}
-			</text>
+			{planData.specError ? (
+				<>
+					<text fg="red">✗ SPEC.md</text>
+					<text fg="#aa6666" attributes={TextAttributes.DIM}>
+						{`  ${planData.specError}`}
+					</text>
+				</>
+			) : (
+				<text fg={planData.hasSpec ? "green" : "#666666"}>
+					{`${planData.hasSpec ? "✓" : "○"} SPEC.md`}
+				</text>
+			)}
+			{planData.prdError ? (
+				<>
+					<text fg="red">✗ prd.json</text>
+					<text fg="#aa6666" attributes={TextAttributes.DIM}>
+						{`  ${planData.prdError}`}
+					</text>
+				</>
+			) : (
+				<text fg={planData.hasPrd ? "green" : "#666666"}>
+					{`${planData.hasPrd ? "✓" : "○"} prd.json`}
+				</text>
+			)}
+
 			{planData.tasks.length > 0 && (
-				<text fg="cyan">{`${doneCount}/${planData.tasks.length} tasks`}</text>
+				<>
+					<text attributes={TextAttributes.BOLD} marginTop={1}>
+						Tasks
+					</text>
+					<text fg="cyan">{`${doneCount}/${planData.tasks.length} done`}</text>
+				</>
 			)}
 
 			<text attributes={TextAttributes.BOLD} marginTop={1}>

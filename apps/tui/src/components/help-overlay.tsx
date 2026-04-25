@@ -61,10 +61,11 @@ export function HelpOverlay({ onClose }: HelpOverlayProps) {
 	return (
 		<box
 			position="absolute"
-			top={0}
-			left={0}
-			right={0}
-			bottom={0}
+			top={2}
+			left="20%"
+			width="60%"
+			zIndex={10}
+			backgroundColor="black"
 			border={true}
 			borderStyle="rounded"
 			borderColor="cyan"

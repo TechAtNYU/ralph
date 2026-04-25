@@ -305,6 +305,8 @@ export class Daemon {
 					return this.success(raw, await this.handleJobCancel(raw));
 				case "job.stream":
 					return this.success(raw, this.handleJobStream(raw));
+				case "job.submit_and_stream":
+					return this.success(raw, await this.handleJobSubmitAndStream(raw));
 			}
 		} catch (error) {
 			return this.failure(raw.id, raw.method, this.toResponseError(error));
@@ -457,6 +459,32 @@ export class Daemon {
 		}
 		this.enqueueById(instanceId, job.id);
 		this.scheduleDrain();
+		return { job };
+	}
+
+	private async handleJobSubmitAndStream(
+		request: RequestByMethod<"job.submit_and_stream">,
+	): Promise<SubmitResult> {
+		if (this.shuttingDown) {
+			throw new StoreError("shutdown", "daemon is shutting down");
+		}
+
+		const { instanceId } = request.params;
+		this.store.assertInstance(this.state, instanceId);
+
+		const now = new Date().toISOString();
+		const job: DaemonJob = {
+			id: randomUUID(),
+			instanceId,
+			session: request.params.session,
+			task: request.params.task,
+			state: "queued",
+			createdAt: now,
+			updatedAt: now,
+		};
+		this.state = this.store.upsertJob(this.state, job);
+		this.enqueue(job);
+		await this.store.save(this.state);
 		return { job };
 	}
 
@@ -658,7 +686,7 @@ export class Daemon {
 		}
 	}
 
-	private scheduleDrain(): void {
+	scheduleDrain(): void {
 		if (this.drainPromise) {
 			this.drainPending = true;
 			return;
@@ -1081,6 +1109,26 @@ export function createConnectionHandler(daemon: Daemon) {
 						issues: normalizeIssues(request.error),
 					},
 				} satisfies ErrorResponse);
+				return;
+			}
+
+			if (request.data.method === "job.submit_and_stream") {
+				void daemon.handleRequest(request.data).then((ack) => {
+					if (!writeLine(ack)) return;
+					if (!ack.ok) return;
+
+					const jobId = (ack.result as SubmitResult).job.id;
+					const unsub = daemon.subscribeJob(jobId, (event) => {
+						if (socket.writable) {
+							socket.write(`${JSON.stringify(event)}\n`);
+						}
+						if (event.type === "done" || event.type === "error") {
+							socket.end();
+						}
+					});
+					socket.on("close", unsub);
+					daemon.scheduleDrain();
+				});
 				return;
 			}
 
