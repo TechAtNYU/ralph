@@ -14,16 +14,11 @@ import {
 import {
 	type CancelResult,
 	type DaemonJob,
-	type DaemonSession,
-	type DaemonState,
-	DaemonState as DaemonStateSchema,
 	type ErrorResponse,
 	type GetResult,
 	type HealthResult,
-	type InstanceHealth,
 	type InstanceListResult,
 	type InstanceResult,
-	type JobState,
 	type JobStreamEvent,
 	type ListResult,
 	type ManagedInstance,
@@ -42,7 +37,18 @@ import {
 	type StreamAckResult,
 	type SubmitResult,
 } from "./protocol";
-import { StateStore, StoreError } from "./store";
+import { type JobSessionRef, StateStore, StoreError } from "./store";
+
+const MAX_TERMINAL_JOBS = 100;
+/**
+ * Upper bound on how long `job.cancel` will wait for the in-flight execution
+ * to settle after the local abort + remote `session.abort` have been issued.
+ * If the remote runtime ignores or is slow to honor the abort, the RPC still
+ * returns promptly with the job's current (non-terminal) row, and the
+ * executor's eventual terminal write is delivered via the `done` stream
+ * event.
+ */
+const CANCEL_WAIT_TIMEOUT_MS = 2_000;
 
 interface RunningJob {
 	controller: AbortController;
@@ -52,6 +58,8 @@ interface RunningJob {
 interface DaemonOptions {
 	registry?: OpencodeRuntimeManager;
 	maxConcurrency?: number;
+	/** Override for `CANCEL_WAIT_TIMEOUT_MS`. Tests only. */
+	cancelWaitTimeoutMs?: number;
 }
 
 function extractText(parts: Part[]): string {
@@ -66,18 +74,45 @@ function extractText(parts: Part[]): string {
 
 const MAX_SESSION_TITLE_LENGTH = 80;
 
-function deriveSessionTitle(job: DaemonJob): string {
-	if (job.session.type === "new" && job.session.title) {
-		return job.session.title;
+function deriveSessionTitle(sessionRef: JobSessionRef, job: DaemonJob): string {
+	if (sessionRef.kind === "new" && sessionRef.title) {
+		return sessionRef.title;
 	}
 	if (job.task.type === "prompt") {
 		const text = job.task.prompt.trim();
+		if (text.length === 0) {
+			return "Untitled";
+		}
 		if (text.length > MAX_SESSION_TITLE_LENGTH) {
 			return `${text.slice(0, MAX_SESSION_TITLE_LENGTH - 3)}...`;
 		}
 		return text;
 	}
 	return "Untitled";
+}
+
+/**
+ * Resolves when either `promise` settles or `timeoutMs` elapses, whichever
+ * comes first. Never rejects. The caller should read downstream state from
+ * the store after this returns — the returned value is intentionally unused.
+ */
+function raceWithTimeout(
+	promise: Promise<unknown>,
+	timeoutMs: number,
+): Promise<void> {
+	return new Promise<void>((resolve) => {
+		let settled = false;
+		const done = () => {
+			if (settled) return;
+			settled = true;
+			resolve();
+		};
+		const timer = setTimeout(done, timeoutMs);
+		promise.finally(() => {
+			clearTimeout(timer);
+			done();
+		});
+	});
 }
 
 function normalizeErrorMessage(error: unknown): string {
@@ -101,17 +136,13 @@ function normalizeErrorMessage(error: unknown): string {
 }
 
 export class Daemon {
-	private state: DaemonState = structuredClone(
-		DaemonStateSchema.parse({
-			instances: [],
-			sessions: [],
-			jobs: [],
-		}),
-	);
 	private readonly registry: OpencodeRuntimeManager;
+	/** Per-instance queue of job ids waiting to be scheduled. */
 	private readonly queues = new Map<string, string[]>();
 	private readonly runningJobs = new Map<string, RunningJob>();
 	private readonly runningTasks = new Map<string, Promise<void>>();
+	/** Maps running job id → its OpenCode session id, for delta routing. */
+	private readonly runningSessionIds = new Map<string, string>();
 	private readonly jobStreams = new Map<
 		string,
 		Set<(event: JobStreamEvent) => void>
@@ -119,10 +150,13 @@ export class Daemon {
 	private startedAt = Date.now();
 	private onShutdown: (() => void) | undefined;
 	private drainPromise: Promise<void> | undefined;
+	/** True if `scheduleDrain` ran while a drain was already in flight — run again when it finishes. */
+	private drainPending = false;
 	private shuttingDown = false;
 	private shutdownPromise: Promise<void> | undefined;
 	private instanceCursor = 0;
 	private readonly maxConcurrency: number;
+	private readonly cancelWaitTimeoutMs: number;
 
 	constructor(
 		private readonly store: StateStore,
@@ -142,6 +176,8 @@ export class Daemon {
 		});
 		this.maxConcurrency =
 			options.maxConcurrency ?? resolveDaemonRuntimeEnv().maxConcurrency;
+		this.cancelWaitTimeoutMs =
+			options.cancelWaitTimeoutMs ?? CANCEL_WAIT_TIMEOUT_MS;
 	}
 
 	setShutdownHandler(handler: () => void): void {
@@ -149,9 +185,17 @@ export class Daemon {
 	}
 
 	async bootstrap(): Promise<void> {
-		this.state = await this.store.load();
-		this.state = await this.recoverPersistedState(this.state);
-		await this.store.save(this.state);
+		await this.store.open();
+		const requeued = this.store.recoverForBootstrap();
+		this.queues.clear();
+		for (const { id, instanceId } of requeued) {
+			this.enqueueById(instanceId, id);
+		}
+		// Also enqueue any queued-at-startup jobs that were never running.
+		for (const job of this.store.listJobs({ state: "queued" })) {
+			this.enqueueById(job.instanceId, job.id);
+		}
+		this.store.pruneTerminalJobs(MAX_TERMINAL_JOBS);
 		this.scheduleDrain();
 	}
 
@@ -184,7 +228,7 @@ export class Daemon {
 				case "session.get":
 					return this.success(raw, this.handleSessionGet(raw));
 				case "job.submit":
-					return this.success(raw, await this.handleJobSubmit(raw));
+					return this.success(raw, this.handleJobSubmit(raw));
 				case "job.list":
 					return this.success(raw, this.handleJobList(raw));
 				case "job.get":
@@ -213,7 +257,7 @@ export class Daemon {
 			await this.drainPromise;
 			await Promise.allSettled([...this.runningTasks.values()]);
 			await this.registry.stopAll();
-			await this.store.save(this.state);
+			this.store.close();
 		})();
 
 		return this.shutdownPromise;
@@ -223,61 +267,33 @@ export class Daemon {
 		return {
 			pid: process.pid,
 			uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
-			queued: this.jobCount("queued"),
-			running: this.jobCount("running"),
-			finished: this.state.jobs.filter((job: DaemonJob) =>
-				["succeeded", "failed", "cancelled"].includes(job.state),
-			).length,
-			instances: this.state.instances.map(
-				(instance: ManagedInstance): InstanceHealth => ({
-					instanceId: instance.id,
-					name: instance.name,
-					status: instance.status,
-					running: this.instanceJobCount(instance.id, "running"),
-					queued: this.instanceJobCount(instance.id, "queued"),
-					finished: this.state.jobs.filter(
-						(job: DaemonJob) =>
-							job.instanceId === instance.id &&
-							["succeeded", "failed", "cancelled"].includes(job.state),
-					).length,
-					lastError: instance.lastError,
-				}),
-			),
+			queued: this.store.countJobsByState("queued"),
+			running: this.store.countJobsByState("running"),
+			finished: this.store.countFinishedJobs(),
+			instances: this.store.instanceHealth(),
 		};
 	}
 
-	private async handleInstanceCreate(
+	private handleInstanceCreate(
 		request: RequestByMethod<"instance.create">,
-	): Promise<InstanceResult> {
-		const now = new Date().toISOString();
-		const instance: ManagedInstance = {
-			id: randomUUID(),
+	): InstanceResult {
+		const instance = this.store.createInstance({
 			name: request.params.name.trim(),
 			directory: request.params.directory,
-			status: "stopped",
 			maxConcurrency: request.params.maxConcurrency ?? 1,
-			createdAt: now,
-			updatedAt: now,
-		};
-		this.state = this.store.createInstance(this.state, instance);
-		await this.store.save(this.state);
+		});
 		return { instance };
 	}
 
 	private handleInstanceList(): InstanceListResult {
-		return {
-			instances: this.store.listInstances(this.state),
-		};
+		return { instances: this.store.listInstances() };
 	}
 
 	private handleInstanceGet(
 		request: RequestByMethod<"instance.get">,
 	): InstanceResult {
 		return {
-			instance: this.store.assertInstance(
-				this.state,
-				request.params.instanceId,
-			),
+			instance: this.store.assertInstance(request.params.instanceId),
 		};
 	}
 
@@ -291,10 +307,7 @@ export class Daemon {
 	private async handleInstanceStop(
 		request: RequestByMethod<"instance.stop">,
 	): Promise<InstanceResult> {
-		const instance = this.store.assertInstance(
-			this.state,
-			request.params.instanceId,
-		);
+		const instance = this.store.assertInstance(request.params.instanceId);
 		if (this.runningCountForInstance(instance.id) > 0) {
 			throw new StoreError(
 				"conflict",
@@ -303,29 +316,15 @@ export class Daemon {
 		}
 
 		await this.registry.stop(instance.id);
-		const stopped: ManagedInstance = {
-			...instance,
-			status: "stopped",
-			updatedAt: new Date().toISOString(),
-		};
-		this.state = this.store.upsertInstance(this.state, stopped);
-		await this.store.save(this.state);
+		const stopped = this.store.setInstanceStatus(instance.id, "stopped");
 		return { instance: stopped };
 	}
 
 	private async handleInstanceRemove(
 		request: RequestByMethod<"instance.remove">,
 	): Promise<InstanceResult> {
-		const instance = this.store.assertInstance(
-			this.state,
-			request.params.instanceId,
-		);
-		const active = this.state.jobs.some(
-			(job: DaemonJob) =>
-				job.instanceId === instance.id &&
-				(job.state === "queued" || job.state === "running"),
-		);
-		if (active) {
+		const instance = this.store.assertInstance(request.params.instanceId);
+		if (this.store.hasActiveJobs(instance.id)) {
 			throw new StoreError(
 				"conflict",
 				`instance ${instance.id} has active jobs and cannot be removed`,
@@ -334,9 +333,7 @@ export class Daemon {
 
 		await this.registry.stop(instance.id);
 		this.queues.delete(instance.id);
-		this.state = this.store.removeInstance(this.state, instance.id);
-		this.state = this.store.removeSessionsForInstance(this.state, instance.id);
-		await this.store.save(this.state);
+		this.store.removeInstance(instance.id);
 		return { instance };
 	}
 
@@ -344,9 +341,7 @@ export class Daemon {
 		request: RequestByMethod<"provider.list">,
 	): Promise<ProviderListResult> {
 		return this.registry.queryProviders(
-			this.state.instances.map(
-				(instance: ManagedInstance) => instance.directory,
-			),
+			this.store.listInstances().map((instance) => instance.directory),
 			request.params.directory,
 			request.params.refresh,
 		);
@@ -355,8 +350,9 @@ export class Daemon {
 	private handleSessionList(
 		request: RequestByMethod<"session.list">,
 	): SessionListResult {
+		this.store.assertInstance(request.params.instanceId);
 		return {
-			sessions: this.store.listSessions(this.state, {
+			sessions: this.store.listSessions({
 				instanceId: request.params.instanceId,
 			}),
 		};
@@ -366,60 +362,49 @@ export class Daemon {
 		request: RequestByMethod<"session.get">,
 	): SessionGetResult {
 		return {
-			session: this.store.assertSession(this.state, request.params.sessionId),
+			session: this.store.assertSession(request.params.sessionId),
 		};
 	}
 
-	private async handleJobSubmit(
+	private handleJobSubmit(
 		request: RequestByMethod<"job.submit">,
-	): Promise<SubmitResult> {
+	): SubmitResult {
 		if (this.shuttingDown) {
 			throw new StoreError("shutdown", "daemon is shutting down");
 		}
 
 		const { instanceId } = request.params;
-		this.store.assertInstance(this.state, instanceId);
+		this.store.assertInstance(instanceId);
 
-		const now = new Date().toISOString();
-		const job: DaemonJob = {
-			id: randomUUID(),
+		const job = this.store.createJob({
 			instanceId,
 			session: request.params.session,
 			task: request.params.task,
-			state: "queued",
-			createdAt: now,
-			updatedAt: now,
-		};
-		this.state = this.store.upsertJob(this.state, job);
-		this.enqueue(job);
-		await this.store.save(this.state);
+		});
+		this.enqueueById(instanceId, job.id);
 		this.scheduleDrain();
 		return { job };
 	}
 
 	private handleJobList(request: RequestByMethod<"job.list">): ListResult {
-		return {
-			jobs: this.store.listJobs(this.state, request.params),
-		};
+		return { jobs: this.store.listJobs(request.params) };
 	}
 
 	private handleJobGet(request: RequestByMethod<"job.get">): GetResult {
-		return {
-			job: this.store.assertJob(this.state, request.params.jobId),
-		};
+		return { job: this.store.assertJob(request.params.jobId) };
 	}
 
 	private handleJobStream(
 		request: RequestByMethod<"job.stream">,
 	): StreamAckResult {
-		this.store.assertJob(this.state, request.params.jobId);
+		this.store.assertJob(request.params.jobId);
 		return { jobId: request.params.jobId };
 	}
 
 	private async handleJobCancel(
 		request: RequestByMethod<"job.cancel">,
 	): Promise<CancelResult> {
-		const job = this.store.assertJob(this.state, request.params.jobId);
+		const job = this.store.assertJob(request.params.jobId);
 
 		if (
 			job.state === "succeeded" ||
@@ -433,36 +418,47 @@ export class Daemon {
 		}
 
 		if (job.state === "queued") {
-			const queue = this.queues.get(job.instanceId);
-			if (queue) {
-				const index = queue.indexOf(job.id);
-				if (index >= 0) {
-					queue.splice(index, 1);
-				}
-			}
-			job.state = "cancelled";
-			job.endedAt = new Date().toISOString();
-			job.updatedAt = job.endedAt;
-			job.error = "Job cancelled";
-			this.state = this.store.upsertJob(this.state, job);
-			await this.store.save(this.state);
-			return { job };
+			this.removeFromQueue(job.instanceId, job.id);
+			const cancelled = this.store.markJobTerminal(job.id, "cancelled", {
+				error: "Job cancelled",
+			});
+			return { job: cancelled };
 		}
 
+		// Running branch: let `executeJob` own the single terminal write so
+		// there is exactly one state transition and one `done` event. We
+		// abort the controller (which triggers `executeJob`'s catch path or
+		// the aborted-after-success branch) and await completion before
+		// returning the terminal job row.
 		const running = this.runningJobs.get(job.id);
-		if (running) {
-			job.state = "cancelled";
-			job.error = "Job cancelled";
-			job.updatedAt = new Date().toISOString();
-			this.state = this.store.upsertJob(this.state, job);
-			await this.store.save(this.state);
-			running.controller.abort();
-			if (job.sessionId) {
-				void this.abortRemoteSession(running.instanceId, job.sessionId);
-			}
+		if (!running) {
+			// Job was in state=running per the store, but no in-memory task —
+			// likely a stale state. Fall back to writing the terminal row
+			// directly so the caller still sees a cancelled job.
+			const cancelled = this.store.markJobTerminal(job.id, "cancelled", {
+				error: "Job cancelled",
+			});
+			return { job: cancelled };
 		}
 
-		return { job };
+		running.controller.abort();
+		const remoteSessionId = this.runningSessionIds.get(job.id);
+		if (remoteSessionId) {
+			void this.abortRemoteSession(running.instanceId, remoteSessionId);
+		}
+
+		// Wait for `executeJob` to settle so the caller sees the terminal
+		// row, but cap the wait: the SDK prompt is not wired to our abort
+		// signal, so if the remote runtime is slow to honor `session.abort`
+		// we would otherwise block the RPC for the full prompt duration.
+		// On timeout, return the current (still-running) row — the caller
+		// can subscribe to `job.stream` for the eventual `done` event.
+		const execution = this.runningTasks.get(job.id);
+		if (execution) {
+			await raceWithTimeout(execution, this.cancelWaitTimeoutMs);
+		}
+
+		return { job: this.store.assertJob(job.id) };
 	}
 
 	/**
@@ -478,7 +474,7 @@ export class Daemon {
 	 * routeDeltaToJob.
 	 */
 	subscribeJob(jobId: string, cb: (event: JobStreamEvent) => void): () => void {
-		const job = this.store.getJob(this.state, jobId);
+		const job = this.store.getJob(jobId);
 		if (
 			job &&
 			(job.state === "succeeded" ||
@@ -530,12 +526,13 @@ export class Daemon {
 
 	/**
 	 * Route an incoming delta from the OpenCode event stream to the matching
-	 * running job. Synchronously appends the delta to the job's accumulated
-	 * `outputText` (only for `text` field deltas) BEFORE emitting the event,
-	 * so the daemon's job state always reflects what subscribers have seen.
+	 * running job. Synchronously appends the delta to the job's `output_text`
+	 * in SQLite BEFORE emitting the event, so the daemon's stored state
+	 * always reflects what subscribers have seen.
 	 *
 	 * MUST remain fully synchronous to preserve the snapshot/delta ordering
-	 * guarantee — see the concurrency note in subscribeJob.
+	 * guarantee — see the concurrency note in subscribeJob. `bun:sqlite` is
+	 * synchronous, so this holds.
 	 */
 	private routeDeltaToJob(
 		instanceId: string,
@@ -545,62 +542,28 @@ export class Daemon {
 	): void {
 		for (const [jobId, running] of this.runningJobs) {
 			if (running.instanceId !== instanceId) continue;
-			const job = this.store.getJob(this.state, jobId);
-			if (job?.sessionId === sessionId) {
-				if (field === "text") {
-					job.outputText = (job.outputText ?? "") + delta;
-					job.updatedAt = new Date().toISOString();
-				}
-				this.emitJobEvent(jobId, { type: "delta", jobId, field, delta });
-				return;
+			if (this.runningSessionIds.get(jobId) !== sessionId) continue;
+			if (field === "text") {
+				this.store.appendJobOutput(jobId, delta);
 			}
+			this.emitJobEvent(jobId, { type: "delta", jobId, field, delta });
+			return;
 		}
 	}
 
-	private async recoverPersistedState(
-		state: DaemonState,
-	): Promise<DaemonState> {
-		let next: DaemonState = {
-			...state,
-			instances: state.instances.map(
-				(instance: ManagedInstance): ManagedInstance => ({
-					...instance,
-					status: "stopped",
-					updatedAt: new Date().toISOString(),
-				}),
-			),
-		};
-		this.queues.clear();
-
-		for (const original of next.jobs) {
-			const job: DaemonJob =
-				original.state === "running"
-					? {
-							...original,
-							state: "queued",
-							error: [original.error, "Recovered after daemon restart"]
-								.filter(Boolean)
-								.join(" "),
-							updatedAt: new Date().toISOString(),
-						}
-					: original;
-
-			next = this.store.upsertJob(next, job);
-			if (job.state === "queued" && job.instanceId) {
-				this.enqueue(job);
-			}
+	private enqueueById(instanceId: string, jobId: string): void {
+		const queue = this.queues.get(instanceId) ?? [];
+		if (!queue.includes(jobId)) {
+			queue.push(jobId);
 		}
-
-		next = this.store.pruneTerminalJobs(next);
-		return next;
+		this.queues.set(instanceId, queue);
 	}
 
-	private enqueue(job: DaemonJob): void {
-		const queue = this.queues.get(job.instanceId) ?? [];
-		if (!queue.includes(job.id)) {
-			queue.push(job.id);
-		}
-		this.queues.set(job.instanceId, queue);
+	private removeFromQueue(instanceId: string, jobId: string): void {
+		const queue = this.queues.get(instanceId);
+		if (!queue) return;
+		const idx = queue.indexOf(jobId);
+		if (idx >= 0) queue.splice(idx, 1);
 	}
 
 	private async drainQueue(): Promise<void> {
@@ -615,16 +578,21 @@ export class Daemon {
 
 	private scheduleDrain(): void {
 		if (this.drainPromise) {
+			this.drainPending = true;
 			return;
 		}
 
 		this.drainPromise = this.drainQueue().finally(() => {
 			this.drainPromise = undefined;
+			if (this.drainPending) {
+				this.drainPending = false;
+				this.scheduleDrain();
+			}
 		});
 	}
 
 	private dequeueNextJob(): DaemonJob | undefined {
-		const instances = this.state.instances;
+		const instances = this.store.listInstances();
 		if (instances.length === 0) {
 			return undefined;
 		}
@@ -647,10 +615,8 @@ export class Daemon {
 
 			while (queue.length > 0) {
 				const jobId = queue.shift();
-				if (!jobId) {
-					break;
-				}
-				const job = this.store.getJob(this.state, jobId);
+				if (!jobId) break;
+				const job = this.store.getJob(jobId);
 				if (job && job.state === "queued" && job.instanceId === instance.id) {
 					return job;
 				}
@@ -667,18 +633,14 @@ export class Daemon {
 			instanceId: job.instanceId,
 		});
 
-		job.state = "running";
-		job.startedAt = new Date().toISOString();
-		job.updatedAt = job.startedAt;
-		this.state = this.store.upsertJob(this.state, job);
-		await this.store.save(this.state);
+		const runningJob = this.store.markJobRunning(job.id);
 
-		const execution = this.executeJob(job, controller)
+		const execution = this.executeJob(runningJob, controller)
 			.catch(() => undefined)
-			.finally(async () => {
+			.finally(() => {
 				this.runningJobs.delete(job.id);
 				this.runningTasks.delete(job.id);
-				await this.store.save(this.state);
+				this.runningSessionIds.delete(job.id);
 				if (!this.shuttingDown) {
 					this.scheduleDrain();
 				}
@@ -690,6 +652,13 @@ export class Daemon {
 		job: DaemonJob,
 		controller: AbortController,
 	): Promise<void> {
+		let terminalState: Extract<
+			DaemonJob["state"],
+			"succeeded" | "failed" | "cancelled"
+		>;
+		const patch: { error?: string; outputText?: string; messageId?: string } =
+			{};
+
 		try {
 			const instance = await this.startInstance(job.instanceId);
 			const runtime = await this.registry.ensureStarted(
@@ -701,47 +670,49 @@ export class Daemon {
 				instance,
 				job,
 			);
+			this.runningSessionIds.set(job.id, sessionId);
 
-			switch (job.task.type) {
-				case "prompt": {
-					const response = await runtime.client.session.prompt({
-						sessionID: sessionId,
-						directory: instance.directory,
-						agent: job.task.agent,
-						model: job.task.model
-							? {
-									providerID: job.task.model.providerId,
-									modelID: job.task.model.modelId,
-								}
-							: undefined,
-						system: job.task.system,
-						variant: job.task.variant,
-						parts: [{ type: "text", text: job.task.prompt }],
-					});
-					job.messageId = response.info.id;
-					// Prefer accumulated text from streamed deltas; fall back to
-					// the final parts payload if no deltas were received (e.g. a
-					// non-streaming provider).
-					const finalText = extractText(response.parts);
-					if (!job.outputText || job.outputText.length === 0) {
-						job.outputText = finalText;
-					}
-					job.error = undefined;
-					job.state = controller.signal.aborted ? "cancelled" : "succeeded";
-					break;
-				}
+			const response = await runtime.client.session.prompt({
+				sessionID: sessionId,
+				directory: instance.directory,
+				agent: job.task.agent,
+				model: job.task.model
+					? {
+							providerID: job.task.model.providerId,
+							modelID: job.task.model.modelId,
+						}
+					: undefined,
+				system: job.task.system,
+				variant: job.task.variant,
+				parts: [{ type: "text", text: job.task.prompt }],
+			});
+			patch.messageId = response.info.id;
+			// Prefer accumulated text from streamed deltas; fall back to the
+			// final parts payload if no deltas were received (non-streaming
+			// providers). Any deltas already landed in output_text via
+			// appendJobOutput, so only write the fallback when nothing was
+			// accumulated.
+			const current = this.store.getJob(job.id);
+			if (!current?.outputText || current.outputText.length === 0) {
+				patch.outputText = extractText(response.parts);
+			}
+			if (controller.signal.aborted) {
+				// prompt() returned successfully but the job was cancelled before
+				// the abort was observed — record the cancellation reason.
+				terminalState = "cancelled";
+				patch.error = "Job cancelled";
+			} else {
+				terminalState = "succeeded";
 			}
 		} catch (error) {
-			job.state = controller.signal.aborted ? "cancelled" : "failed";
-			job.error = controller.signal.aborted
+			terminalState = controller.signal.aborted ? "cancelled" : "failed";
+			patch.error = controller.signal.aborted
 				? "Job cancelled"
 				: normalizeErrorMessage(error);
-		} finally {
-			job.endedAt = new Date().toISOString();
-			job.updatedAt = job.endedAt;
-			this.state = this.store.upsertJob(this.state, job);
-			this.emitJobEvent(job.id, { type: "done", jobId: job.id, job });
 		}
+
+		const finalJob = this.store.markJobTerminal(job.id, terminalState, patch);
+		this.emitJobEvent(job.id, { type: "done", jobId: job.id, job: finalJob });
 	}
 
 	private async resolveSession(
@@ -749,85 +720,37 @@ export class Daemon {
 		instance: ManagedInstance,
 		job: DaemonJob,
 	): Promise<string> {
-		if (job.sessionId) {
-			return job.sessionId;
-		}
+		if (job.sessionId) return job.sessionId;
+		const sessionRef = this.store.getSessionForJob(job.id);
+		if (sessionRef.remoteSessionId) return sessionRef.remoteSessionId;
 
-		if (job.session.type === "existing") {
-			job.sessionId = job.session.sessionId;
-			return job.sessionId;
-		}
-
-		const title = deriveSessionTitle(job);
+		const title = deriveSessionTitle(sessionRef, job);
 		const session = await client.session.create({
 			directory: instance.directory,
 			title,
 		});
-		job.sessionId = session.id;
-
-		const now = new Date().toISOString();
-		const daemonSession: DaemonSession = {
-			id: session.id,
-			instanceId: instance.id,
-			title,
-			createdAt: now,
-			updatedAt: now,
-		};
-		this.state = this.store.upsertSession(this.state, daemonSession);
-		this.state = this.store.upsertJob(this.state, job);
-		await this.store.save(this.state);
+		this.store.assignRemoteSessionToJob(job.id, session.id, title);
 		return session.id;
 	}
 
 	private async startInstance(instanceId: string): Promise<ManagedInstance> {
-		const current = this.store.assertInstance(this.state, instanceId);
+		const current = this.store.assertInstance(instanceId);
 		if (this.registry.isRunning(instanceId)) {
 			if (current.status !== "running") {
-				const running = {
-					...current,
-					status: "running" as const,
-					lastError: undefined,
-					updatedAt: new Date().toISOString(),
-				};
-				this.state = this.store.upsertInstance(this.state, running);
-				await this.store.save(this.state);
-				return running;
+				return this.store.setInstanceStatus(instanceId, "running");
 			}
 			return current;
 		}
 
-		const starting: ManagedInstance = {
-			...current,
-			status: "starting",
-			updatedAt: new Date().toISOString(),
-		};
-		this.state = this.store.upsertInstance(this.state, starting);
-		await this.store.save(this.state);
+		this.store.setInstanceStatus(instanceId, "starting");
 
 		try {
 			await this.registry.ensureStarted(instanceId, current.directory);
-			const running: ManagedInstance = {
-				...starting,
-				status: "running",
-				lastError: undefined,
-				updatedAt: new Date().toISOString(),
-			};
-			this.state = this.store.upsertInstance(this.state, running);
-			await this.store.save(this.state);
-			return running;
+			return this.store.setInstanceStatus(instanceId, "running");
 		} catch (error) {
-			const failed: ManagedInstance = {
-				...starting,
-				status: "error",
-				lastError: normalizeErrorMessage(error),
-				updatedAt: new Date().toISOString(),
-			};
-			this.state = this.store.upsertInstance(this.state, failed);
-			await this.store.save(this.state);
-			throw new StoreError(
-				"instance_unavailable",
-				failed.lastError ?? "failed to start instance",
-			);
+			const message = normalizeErrorMessage(error);
+			this.store.setInstanceStatus(instanceId, "error", message);
+			throw new StoreError("instance_unavailable", message);
 		}
 	}
 
@@ -836,10 +759,8 @@ export class Daemon {
 		sessionId: string,
 	): Promise<void> {
 		const runtime = this.registry.get(instanceId);
-		const instance = this.store.getInstance(this.state, instanceId);
-		if (!runtime || !instance) {
-			return;
-		}
+		const instance = this.store.getInstance(instanceId);
+		if (!runtime || !instance) return;
 
 		try {
 			await runtime.client.session.abort({
@@ -854,22 +775,9 @@ export class Daemon {
 	private runningCountForInstance(instanceId: string): number {
 		let total = 0;
 		for (const running of this.runningJobs.values()) {
-			if (running.instanceId === instanceId) {
-				total += 1;
-			}
+			if (running.instanceId === instanceId) total += 1;
 		}
 		return total;
-	}
-
-	private jobCount(state: JobState): number {
-		return this.state.jobs.filter((job: DaemonJob) => job.state === state)
-			.length;
-	}
-
-	private instanceJobCount(instanceId: string, state: JobState): number {
-		return this.state.jobs.filter(
-			(job: DaemonJob) => job.instanceId === instanceId && job.state === state,
-		).length;
 	}
 
 	private success<M extends RequestMethod>(
@@ -1058,7 +966,7 @@ export async function runDaemonServer(): Promise<void> {
 	await ensureSocketDir(env.socketPath);
 	await clearStaleSocket(env.socketPath);
 
-	const daemon = new Daemon(new StateStore(env.statePath), {
+	const daemon = new Daemon(new StateStore(env.databasePath), {
 		maxConcurrency: env.maxConcurrency,
 	});
 	await daemon.bootstrap();

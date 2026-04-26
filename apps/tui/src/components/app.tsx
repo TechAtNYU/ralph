@@ -167,8 +167,14 @@ function Dashboard({
 				const selectedInst = instanceList.instances[safeIndex];
 				const [jobs, sessionResult] = await Promise.all([
 					daemon.listJobs(selectedInst ? { instanceId: selectedInst.id } : {}),
+					// If the selected instance was removed between `listInstances`
+					// and this call, the daemon now throws `not_found` instead of
+					// returning an empty list. Swallow that narrow race so the
+					// whole refresh doesn't fail.
 					selectedInst
-						? daemon.listSessions(selectedInst.id)
+						? daemon
+								.listSessions(selectedInst.id)
+								.catch(() => ({ sessions: [] }))
 						: Promise.resolve({ sessions: [] }),
 				]);
 				setSelectedIndex(safeIndex);

@@ -17,7 +17,7 @@ describe("env", () => {
 		expect(env).toEqual({
 			ralphHome,
 			socketPath: join(ralphHome, "ralphd.sock"),
-			statePath: join(ralphHome, "state.json"),
+			databasePath: join(ralphHome, "state.sqlite"),
 		});
 	});
 
@@ -29,7 +29,7 @@ describe("env", () => {
 		).toEqual({
 			ralphHome: "/tmp/ralph",
 			socketPath: "/tmp/ralph/ralphd.sock",
-			statePath: "/tmp/ralph/state.json",
+			databasePath: "/tmp/ralph/state.sqlite",
 		});
 
 		expect(

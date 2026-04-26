@@ -73,11 +73,10 @@ const ManagedInstance = z.strictObject({
 export type ManagedInstance = z.infer<typeof ManagedInstance>;
 
 /** A job that has been submitted to the daemon for execution. */
-const DaemonJob = z.strictObject({
+export const DaemonJob = z.strictObject({
 	id: z.string().min(1),
 	instanceId: z.string().min(1),
 	sessionId: z.string().min(1).optional(),
-	session: JobSession,
 	task: JobTask,
 	state: JobState,
 	createdAt: IsoDateTime,
@@ -90,8 +89,8 @@ const DaemonJob = z.strictObject({
 });
 export type DaemonJob = z.infer<typeof DaemonJob>;
 
-/** A conversation session belonging to an instance. */
-const DaemonSession = z.strictObject({
+/** A conversation session belonging to an instance (id is the remote OpenCode session id). */
+export const DaemonSession = z.strictObject({
 	id: z.string().min(1),
 	instanceId: z.string().min(1),
 	title: z.string().min(1),
@@ -666,17 +665,6 @@ export const ResponseMessage = z.union([
 	ErrorResponse,
 ]);
 export type ResponseMessage = z.infer<typeof ResponseMessage>;
-
-// ---------------------------------------------------------------------------
-// Daemon persisted state
-// ---------------------------------------------------------------------------
-
-export const DaemonState = z.strictObject({
-	instances: z.array(ManagedInstance),
-	sessions: z.array(DaemonSession),
-	jobs: z.array(DaemonJob),
-});
-export type DaemonState = z.infer<typeof DaemonState>;
 
 // ---------------------------------------------------------------------------
 // Utility types — type-level helpers for method-based dispatch

@@ -60,6 +60,11 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 		sessionId: string;
 		prompt: string;
 	}> = [];
+	readonly sessionCreateCalls: Array<{
+		instanceId: string;
+		directory?: string;
+		title?: string;
+	}> = [];
 	readonly abortCalls: Array<{ instanceId: string; sessionId: string }> = [];
 	readonly directoriesStarted: string[] = [];
 	readonly disposeCalls: Array<{ directory?: string }> = [];
@@ -105,9 +110,18 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 					},
 				},
 				session: {
-					create: async () => {
+					create: async (parameters) => {
+						this.sessionCreateCalls.push({
+							instanceId,
+							directory: parameters.directory,
+							title: parameters.title,
+						});
 						const id = `session-${instanceId}-${this.sessionSequence++}`;
-						return fakeSession({ id });
+						return fakeSession({
+							id,
+							directory: parameters.directory ?? "/fake",
+							title: parameters.title ?? "fake",
+						});
 					},
 					prompt: async (parameters) => {
 						const sessionId = parameters.sessionID;

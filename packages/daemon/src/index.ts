@@ -1,5 +1,5 @@
 export { DaemonClient, daemon } from "./client";
-export { RALPH_HOME, resolveDaemonPaths } from "./env";
+export { DATABASE_PATH, RALPH_HOME, resolveDaemonPaths } from "./env";
 export {
 	ensureDaemonRunning,
 	runForegroundDaemon,

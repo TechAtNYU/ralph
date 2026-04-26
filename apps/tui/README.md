@@ -16,7 +16,7 @@ bun run src/cli.ts daemon health
 bun run src/cli.ts daemon stop
 ```
 
-The daemon listens on a Unix socket at `~/.ralph/ralphd.sock` and persists state in `~/.ralph/state.json`.
+The daemon listens on a Unix socket at `~/.ralph/ralphd.sock` and persists state in `~/.ralph/state.sqlite` (SQLite).
 
 ## Run the TUI shell
 

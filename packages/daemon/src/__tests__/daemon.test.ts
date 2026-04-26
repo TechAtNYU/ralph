@@ -47,7 +47,7 @@ describe("Daemon", () => {
 
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(join(tmpdir(), "ralph-daemon-test-"));
-		store = new StateStore(join(tmpDir, "state.json"));
+		store = new StateStore(join(tmpDir, "state.sqlite"));
 		registry = new FakeOpencodeRegistry(40);
 		daemon = new Daemon(store, { registry });
 		await daemon.bootstrap();
@@ -101,6 +101,42 @@ describe("Daemon", () => {
 		);
 		const result = expectSuccess(submit, "job.submit");
 		expect(result.job.instanceId).toBe(instance.instance.id);
+	});
+
+	test("forwards new session titles when creating remote sessions", async () => {
+		const created = await daemon.handleRequest(
+			req({
+				id: "instance-create",
+				method: "instance.create",
+				params: {
+					name: "One",
+					directory: "/tmp/project-one",
+				},
+			}),
+		);
+		const instance = expectSuccess(created, "instance.create");
+
+		await daemon.handleRequest(
+			req({
+				id: "job-submit",
+				method: "job.submit",
+				params: {
+					instanceId: instance.instance.id,
+					session: { type: "new", title: "Sprint Planning" },
+					task: {
+						type: "prompt",
+						prompt: "hello world",
+					},
+				},
+			}),
+		);
+
+		await Bun.sleep(80);
+		expect(registry.sessionCreateCalls).toContainEqual({
+			instanceId: instance.instance.id,
+			directory: "/tmp/project-one",
+			title: "Sprint Planning",
+		});
 	});
 
 	test("rejects submit with nonexistent instance", async () => {
@@ -265,34 +301,227 @@ describe("Daemon", () => {
 		expect(expectSuccess(cancel, "job.cancel").job.state).toBe("cancelled");
 	});
 
-	test("requeues running jobs after restart", async () => {
-		await store.save({
-			instances: [
-				{
-					id: "instance-1",
+	test("cancelling a running job preserves the cancel error on the terminal row", async () => {
+		const created = await daemon.handleRequest(
+			req({
+				id: "instance-create",
+				method: "instance.create",
+				params: {
 					name: "One",
 					directory: "/tmp/project-one",
-					status: "running",
 					maxConcurrency: 1,
-					createdAt: "2026-01-01T00:00:00.000Z",
-					updatedAt: "2026-01-01T00:00:00.000Z",
 				},
-			],
-			sessions: [],
-			jobs: [
-				{
-					id: "job-1",
-					instanceId: "instance-1",
-					session: { type: "new" },
-					task: { type: "prompt", prompt: "recover" },
-					state: "running",
-					createdAt: "2026-01-01T00:00:00.000Z",
-					updatedAt: "2026-01-01T00:00:00.000Z",
-				},
-			],
-		});
+			}),
+		);
+		const createdResult = expectSuccess(created, "instance.create");
 
-		const nextDaemon = new Daemon(store, {
+		const submitted = await daemon.handleRequest(
+			req({
+				id: "job-submit",
+				method: "job.submit",
+				params: {
+					instanceId: createdResult.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "long-task" },
+				},
+			}),
+		);
+		const submittedResult = expectSuccess(submitted, "job.submit");
+
+		// Wait until the job has transitioned to running inside the fake runtime.
+		await Bun.sleep(10);
+
+		const cancel = await daemon.handleRequest(
+			req({
+				id: "job-cancel",
+				method: "job.cancel",
+				params: { jobId: submittedResult.job.id },
+			}),
+		);
+		const cancelled = expectSuccess(cancel, "job.cancel").job;
+		expect(cancelled.state).toBe("cancelled");
+		expect(cancelled.error).toBe("Job cancelled");
+
+		// Double-check via store after execution has fully settled — no later
+		// terminal write should have nulled out the error column.
+		await Bun.sleep(60);
+		const get = await daemon.handleRequest(
+			req({
+				id: "job-get",
+				method: "job.get",
+				params: { jobId: submittedResult.job.id },
+			}),
+		);
+		const finalJob = expectSuccess(get, "job.get").job;
+		expect(finalJob.state).toBe("cancelled");
+		expect(finalJob.error).toBe("Job cancelled");
+	});
+
+	test("cancelling a running job returns within the timeout when the remote is slow", async () => {
+		// Recreate the daemon with a very long prompt delay and a short
+		// cancel wait timeout. The fake runtime's `abort` is a no-op so
+		// the prompt always runs to completion — this simulates a remote
+		// runtime that ignores `session.abort`.
+		await daemon.shutdown();
+		const slowRegistry = new FakeOpencodeRegistry(1_000);
+		const slowStore = new StateStore(join(tmpDir, "slow.sqlite"));
+		const slowDaemon = new Daemon(slowStore, {
+			registry: slowRegistry,
+			cancelWaitTimeoutMs: 30,
+		});
+		await slowDaemon.bootstrap();
+
+		const created = await slowDaemon.handleRequest(
+			req({
+				id: "inst",
+				method: "instance.create",
+				params: {
+					name: "slow",
+					directory: "/tmp/project-slow",
+					maxConcurrency: 1,
+				},
+			}),
+		);
+		const instanceId = expectSuccess(created, "instance.create").instance.id;
+
+		const submitted = await slowDaemon.handleRequest(
+			req({
+				id: "sub",
+				method: "job.submit",
+				params: {
+					instanceId,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "slow" },
+				},
+			}),
+		);
+		const jobId = expectSuccess(submitted, "job.submit").job.id;
+
+		// Wait until the job is running.
+		await Bun.sleep(20);
+
+		// Cancel and measure.
+		const start = Date.now();
+		const cancel = await slowDaemon.handleRequest(
+			req({
+				id: "cancel",
+				method: "job.cancel",
+				params: { jobId },
+			}),
+		);
+		const elapsed = Date.now() - start;
+
+		// Must return well before the 1s prompt delay completes.
+		expect(elapsed).toBeLessThan(500);
+		// Returned row may still be `running` (timeout fired first) — that
+		// is the point of the timeout; the terminal row will arrive via
+		// the `done` stream event.
+		const returned = expectSuccess(cancel, "job.cancel").job;
+		expect(["running", "cancelled"]).toContain(returned.state);
+
+		// Allow the fake's prompt to complete and executeJob to record
+		// the terminal row.
+		await Bun.sleep(1_100);
+		const get = await slowDaemon.handleRequest(
+			req({
+				id: "get",
+				method: "job.get",
+				params: { jobId },
+			}),
+		);
+		const settled = expectSuccess(get, "job.get").job;
+		expect(settled.state).toBe("cancelled");
+		expect(settled.error).toBe("Job cancelled");
+
+		await slowDaemon.shutdown();
+	});
+
+	test("session.list rejects unknown instance ids", async () => {
+		const response = await daemon.handleRequest(
+			req({
+				id: "session-list",
+				method: "session.list",
+				params: { instanceId: "does-not-exist" },
+			}),
+		);
+		expect(expectFailure(response).error.code).toBe("not_found");
+	});
+
+	test("submitting a second job during an in-flight drain still runs it promptly", async () => {
+		const createOne = await daemon.handleRequest(
+			req({
+				id: "inst-1",
+				method: "instance.create",
+				params: { name: "One", directory: "/tmp/project-one" },
+			}),
+		);
+		const createTwo = await daemon.handleRequest(
+			req({
+				id: "inst-2",
+				method: "instance.create",
+				params: { name: "Two", directory: "/tmp/project-two" },
+			}),
+		);
+		const one = expectSuccess(createOne, "instance.create");
+		const two = expectSuccess(createTwo, "instance.create");
+
+		// Submit two jobs back-to-back. The second submit happens while the
+		// first scheduleDrain()'s microtask/promise is still in flight and
+		// must be coalesced via drainPending so the second job runs without
+		// waiting for the first to complete.
+		await daemon.handleRequest(
+			req({
+				id: "submit-1",
+				method: "job.submit",
+				params: {
+					instanceId: one.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "first" },
+				},
+			}),
+		);
+		await daemon.handleRequest(
+			req({
+				id: "submit-2",
+				method: "job.submit",
+				params: {
+					instanceId: two.instance.id,
+					session: { type: "new" },
+					task: { type: "prompt", prompt: "second" },
+				},
+			}),
+		);
+
+		// Fake prompt delay is 40ms; if drain coalescing regressed, the
+		// second job would run strictly after the first and both jobs would
+		// not be concurrently active.
+		await Bun.sleep(30);
+		expect(registry.globalMaxConcurrent).toBeGreaterThanOrEqual(2);
+	});
+
+	test("requeues running jobs after restart", async () => {
+		// Shut down the beforeEach daemon so we can simulate a crashed state
+		// by writing directly to the SQLite file.
+		await daemon.shutdown();
+
+		const seedStore = new StateStore(join(tmpDir, "state.sqlite"));
+		await seedStore.open();
+		const instance = seedStore.createInstance({
+			name: "One",
+			directory: "/tmp/project-one",
+			maxConcurrency: 1,
+		});
+		seedStore.setInstanceStatus(instance.id, "running");
+		const job = seedStore.createJob({
+			instanceId: instance.id,
+			session: { type: "new" },
+			task: { type: "prompt", prompt: "recover" },
+		});
+		seedStore.markJobRunning(job.id);
+		seedStore.close();
+
+		const nextStore = new StateStore(join(tmpDir, "state.sqlite"));
+		const nextDaemon = new Daemon(nextStore, {
 			registry: new FakeOpencodeRegistry(10),
 		});
 		await nextDaemon.bootstrap();
@@ -300,7 +529,7 @@ describe("Daemon", () => {
 			req({
 				id: "job-get",
 				method: "job.get",
-				params: { jobId: "job-1" },
+				params: { jobId: job.id },
 			}),
 		);
 		expect(["queued", "running", "succeeded"]).toContain(
@@ -318,7 +547,7 @@ describe("Daemon sessions", () => {
 
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(join(tmpdir(), "ralph-daemon-session-"));
-		store = new StateStore(join(tmpDir, "state.json"));
+		store = new StateStore(join(tmpDir, "state.sqlite"));
 		registry = new FakeOpencodeRegistry(10);
 		daemon = new Daemon(store, { registry });
 		await daemon.bootstrap();
@@ -542,7 +771,8 @@ describe("Daemon sessions", () => {
 			}),
 		);
 
-		// Verify sessions are gone
+		// After removal, session.list for that instance must fail with
+		// not_found — the cascade deletes sessions with the instance row.
 		const after = await daemon.handleRequest(
 			req({
 				id: "session-list-after",
@@ -550,7 +780,7 @@ describe("Daemon sessions", () => {
 				params: { instanceId },
 			}),
 		);
-		expect(expectSuccess(after, "session.list").sessions).toHaveLength(0);
+		expect(expectFailure(after).error.code).toBe("not_found");
 	});
 });
 
@@ -562,7 +792,7 @@ describe("Daemon streaming", () => {
 
 	beforeEach(async () => {
 		tmpDir = await mkdtemp(join(tmpdir(), "ralph-daemon-stream-"));
-		store = new StateStore(join(tmpDir, "state.json"));
+		store = new StateStore(join(tmpDir, "state.sqlite"));
 		registry = new FakeOpencodeRegistry(40);
 		daemon = new Daemon(store, { registry });
 		await daemon.bootstrap();
