@@ -1,10 +1,13 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useChat } from "../hooks/use-chat";
 import type { PlanFilesData } from "../hooks/use-plan-files";
 import type { usePlanInstance } from "../hooks/use-plan-instance";
 import { useSkill } from "../hooks/use-skill";
-import type { SkillContext } from "../skills";
+import { writePrdArtifact, writeSpecArtifact } from "../lib/plan-artifacts";
+import type { Skill, SkillContext } from "../skills";
 import { ContextSidebar } from "./context-sidebar";
 import { PlanChat } from "./plan-chat";
 import { TaskOverlay } from "./task-overlay";
@@ -16,6 +19,46 @@ interface PlanViewProps {
 	planData: PlanFilesData;
 	daemonOnline: boolean;
 	planInstance: ReturnType<typeof usePlanInstance>;
+}
+
+async function readSpecForPrompt(scaffoldPath: string): Promise<string> {
+	const spec = await readFile(join(scaffoldPath, "SPEC.md"), "utf8");
+	const trimmed = spec.trim();
+	if (!trimmed) {
+		throw new Error("SPEC.md is empty");
+	}
+	return trimmed;
+}
+
+async function buildSkillPrompt(
+	skill: Skill,
+	ctx: SkillContext,
+	prompt: string,
+): Promise<string> {
+	if (skill.id !== "prd") {
+		return prompt;
+	}
+	const spec = await readSpecForPrompt(ctx.scaffoldPath);
+	return `${prompt}
+
+SPEC.md:
+\`\`\`markdown
+${spec}
+\`\`\``;
+}
+
+async function writeSkillArtifact(
+	skill: Skill,
+	ctx: SkillContext,
+	content: string,
+): Promise<void> {
+	if (skill.id === "spec") {
+		await writeSpecArtifact(ctx.scaffoldPath, content);
+		return;
+	}
+	if (skill.id === "prd") {
+		await writePrdArtifact(ctx.scaffoldPath, content);
+	}
 }
 
 export function PlanView({
@@ -93,13 +136,33 @@ export function PlanView({
 			if (!skill) return;
 			const { scaffoldPath } = await ensureInstance();
 			const ctx: SkillContext = { scaffoldPath };
-			await chatSend({
-				prompt,
+			let finalPrompt: string;
+			try {
+				finalPrompt = await buildSkillPrompt(skill, ctx, prompt);
+			} catch (e) {
+				addSystemMessage(
+					`SPEC.md: ${e instanceof Error ? e.message : "failed to read file"}`,
+				);
+				return;
+			}
+			const result = await chatSend({
+				prompt: finalPrompt,
 				systemPrompt: skill.buildSystemPrompt(ctx),
 				permission: skill.buildPermission(ctx),
 			});
+			if (!result?.content) return;
+			try {
+				await writeSkillArtifact(skill, ctx, result.content);
+			} catch (e) {
+				const filename = skill.id === "spec" ? "SPEC.md" : "prd.json";
+				const reason =
+					e instanceof Error ? e.message : "generated response was invalid";
+				addSystemMessage(
+					`${filename}: generated response was invalid (${reason})`,
+				);
+			}
 		},
-		[skill, ensureInstance, chatSend],
+		[skill, ensureInstance, chatSend, addSystemMessage],
 	);
 
 	const handleStartSkill = async (id: "spec" | "prd") => {
@@ -108,11 +171,31 @@ export function PlanView({
 		if (!s.buildAutoPrompt) return;
 		const { scaffoldPath } = await ensureInstance();
 		const ctx: SkillContext = { scaffoldPath };
-		await chatSend({
-			prompt: s.buildAutoPrompt(ctx),
+		let prompt: string;
+		try {
+			prompt = await buildSkillPrompt(s, ctx, s.buildAutoPrompt(ctx));
+		} catch (e) {
+			addSystemMessage(
+				`SPEC.md: ${e instanceof Error ? e.message : "failed to read file"}`,
+			);
+			return;
+		}
+		const result = await chatSend({
+			prompt,
 			systemPrompt: s.buildSystemPrompt(ctx),
 			permission: s.buildPermission(ctx),
 		});
+		if (!result?.content) return;
+		try {
+			await writeSkillArtifact(s, ctx, result.content);
+		} catch (e) {
+			const filename = s.id === "spec" ? "SPEC.md" : "prd.json";
+			const reason =
+				e instanceof Error ? e.message : "generated response was invalid";
+			addSystemMessage(
+				`${filename}: generated response was invalid (${reason})`,
+			);
+		}
 	};
 
 	useKeyboard((key) => {

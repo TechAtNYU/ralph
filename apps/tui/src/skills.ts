@@ -15,14 +15,8 @@ export interface Skill {
 
 export type ActiveSkill = "spec" | "prd" | null;
 
-function buildPlanFilePermissions(ctx: SkillContext): PermissionRule[] {
+function buildPlanChatPermissions(_ctx: SkillContext): PermissionRule[] {
 	return [
-		{ permission: "read", pattern: "*", action: "allow" },
-		{
-			permission: "write",
-			pattern: `${ctx.scaffoldPath}/*`,
-			action: "allow",
-		},
 		{ permission: "question", pattern: "*", action: "deny" },
 		{ permission: "*", pattern: "*", action: "deny" },
 	];
@@ -32,16 +26,16 @@ export const SPEC_SKILL: Skill = {
 	id: "spec",
 	name: "Spec",
 	inputPlaceholder: "Describe your project...",
-	buildPermission: buildPlanFilePermissions,
+	buildPermission: buildPlanChatPermissions,
 	buildSystemPrompt: (
 		ctx,
-	) => `You are a spec writer. Your ONLY job is to create \`SPEC.md\` in the plan workspace by calling the \`write\` tool.
+	) => `You are a spec writer. Your ONLY job is to produce the final contents for \`SPEC.md\`.
 
 RULES:
-- You MUST use the \`write\` tool to create the file. Do NOT emit the spec as text in your response — it must be written via the tool.
+- Return ONLY the markdown content for \`SPEC.md\`.
+- Do NOT call tools. Do NOT print pseudo tool calls such as \`<tool_call>write(...)\`.
 - Ask the user 2-3 brief clarifying questions about what they're building, then write the spec. If the description is already clear, skip questions and write immediately.
-- Do NOT run shell commands. Do NOT create other files.
-- After calling \`write\`, confirm briefly in text ("wrote SPEC.md") and stop.
+- Do NOT include commentary before or after the markdown.
 
 TARGET FILE (absolute path):
 ${ctx.scaffoldPath}/SPEC.md
@@ -76,21 +70,22 @@ export const PRD_SKILL: Skill = {
 	id: "prd",
 	name: "PRD",
 	inputPlaceholder: "Refine the task breakdown...",
-	buildPermission: buildPlanFilePermissions,
+	buildPermission: buildPlanChatPermissions,
 	buildAutoPrompt: (ctx) =>
-		`Read ${ctx.scaffoldPath}/SPEC.md and create a task breakdown. Write it to ${ctx.scaffoldPath}/prd.json using the write tool.`,
+		`Create a task breakdown for ${ctx.scaffoldPath}/prd.json from the SPEC.md content below.`,
 	buildSystemPrompt: (
 		ctx,
-	) => `You are a task planner. Your ONLY job is to read \`SPEC.md\` from the plan workspace and produce \`prd.json\` in the same workspace by calling the \`write\` tool.
+	) => `You are a task planner. Your ONLY job is to produce the final JSON contents for \`prd.json\`.
 
 RULES:
-- You MUST use the \`write\` tool to create the file. Do NOT emit the JSON as text in your response — it must be written via the tool.
-- Do NOT run shell commands. Do NOT create other files.
+- Return ONLY raw JSON matching the schema below.
+- Do NOT call tools. Do NOT print pseudo tool calls such as \`<tool_call>write(...)\`.
+- Use the SPEC.md content supplied in the user prompt.
 - Each task must be completable in a single agent session (~1-2 hours).
 - Every task MUST end with verification subtasks (tests, typecheck, lint).
 - No overlapping scope between tasks.
 - Order: setup → models → features → polish → integration tests.
-- After calling \`write\`, confirm briefly in text ("wrote prd.json") and stop.
+- Do NOT include commentary before or after the JSON.
 
 INPUT FILE (absolute path):
 ${ctx.scaffoldPath}/SPEC.md

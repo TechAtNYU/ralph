@@ -1,20 +1,9 @@
 import { readFile, watch } from "node:fs";
 import { join } from "node:path";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { z } from "zod";
+import { type PrdTask, parsePrd, validateSpec } from "../lib/plan-validation";
 
-const PrdTaskSchema = z.object({
-	description: z.string().min(1),
-	subtasks: z.array(z.string().min(1)).min(1),
-	notes: z.string().optional().default(""),
-	passed: z.boolean().optional().default(false),
-});
-
-const PrdFileSchema = z.object({
-	tasks: z.array(PrdTaskSchema).min(1),
-});
-
-export type PrdTask = z.infer<typeof PrdTaskSchema>;
+export type { PrdTask } from "../lib/plan-validation";
 
 export interface PlanFilesData {
 	tasks: PrdTask[];
@@ -42,46 +31,6 @@ function readFileAsync(path: string): Promise<string | null> {
 			}
 		});
 	});
-}
-
-interface PrdParseResult {
-	tasks: PrdTask[];
-	error?: string;
-}
-
-function parsePrd(content: string | null): PrdParseResult {
-	if (content === null) return { tasks: [] };
-	let json: unknown;
-	try {
-		json = JSON.parse(content);
-	} catch {
-		return { tasks: [], error: "invalid JSON" };
-	}
-	const parsed = PrdFileSchema.safeParse(json);
-	if (!parsed.success) {
-		const first = parsed.error.issues[0];
-		const path = first?.path.join(".") || "root";
-		const message = first?.message ?? "validation failed";
-		return { tasks: [], error: `${path}: ${message}` };
-	}
-	return { tasks: parsed.data.tasks };
-}
-
-interface SpecValidation {
-	valid: boolean;
-	error?: string;
-}
-
-function validateSpec(content: string | null): SpecValidation {
-	if (content === null) return { valid: false };
-	const trimmed = content.trim();
-	if (trimmed.length < 100) {
-		return { valid: false, error: "too short (<100 chars)" };
-	}
-	if (!/^#\s+\S/m.test(trimmed)) {
-		return { valid: false, error: "missing markdown heading" };
-	}
-	return { valid: true };
 }
 
 export function usePlanFiles(scaffoldPath: string | null): UsePlanFilesReturn {

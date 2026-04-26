@@ -1,4 +1,4 @@
-import { daemon, type PermissionRule } from "@techatnyu/ralphd";
+import { type DaemonJob, daemon, type PermissionRule } from "@techatnyu/ralphd";
 import { useCallback, useRef, useState } from "react";
 import { createPromptTask } from "../lib/prompt-task";
 import { ralphStore } from "../lib/store";
@@ -14,11 +14,16 @@ export interface SendOptions {
 	permission?: PermissionRule[];
 }
 
+export interface SendResult {
+	content: string;
+	job?: DaemonJob;
+}
+
 interface UseChatReturn {
 	messages: ChatMessage[];
 	loading: boolean;
 	error: string | undefined;
-	send: (options: SendOptions) => Promise<void>;
+	send: (options: SendOptions) => Promise<SendResult | undefined>;
 	addSystemMessage: (content: string) => void;
 	resetSession: () => void;
 	clear: () => void;
@@ -53,7 +58,7 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 
 	const send = useCallback(
 		async ({ prompt, systemPrompt, permission }: SendOptions) => {
-			if (loading) return;
+			if (loading) return undefined;
 
 			setMessages((prev) => [...prev, { role: "user", content: prompt }]);
 			setLoading(true);
@@ -100,27 +105,33 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 								role: "system",
 								content: `Error: ${message}`,
 							}));
-							break;
+							return undefined;
 						}
+						if (event.job.state !== "succeeded") {
+							return undefined;
+						}
+						let final = content.trim();
 						if (!content.trim()) {
-							const final = event.job.outputText?.trim() || "(empty response)";
+							final = event.job.outputText?.trim() || "";
 							updateLastMessage(() => ({
 								role: "assistant",
-								content: final,
+								content: final || "(empty response)",
 							}));
 						}
-						break;
+						return { content: final, job: event.job };
 					} else if (event.type === "error") {
 						setError(event.error);
 						updateLastMessage(() => ({
 							role: "system",
 							content: `Error: ${event.error}`,
 						}));
-						break;
+						return undefined;
 					}
 				}
+				return undefined;
 			} catch (e) {
 				setError(e instanceof Error ? e.message : "Failed to submit message");
+				return undefined;
 			} finally {
 				setLoading(false);
 			}
