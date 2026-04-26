@@ -8,11 +8,22 @@ import {
 	type ParamsByMethod,
 	RequestMessage as RequestMessageSchema,
 	type RequestMethod,
+	type ResponseError,
 	type ResponseMessage,
 	ResponseMessage as ResponseMessageSchema,
 	type ResultByMethod,
 	SOCKET_PATH,
 } from "./protocol";
+
+export class DaemonError extends Error {
+	constructor(
+		message: string,
+		public readonly code: ResponseError["code"],
+	) {
+		super(message);
+		this.name = "DaemonError";
+	}
+}
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 const HEALTHCHECK_TIMEOUT_MS = 500;
@@ -84,7 +95,7 @@ function send<M extends RequestMethod>(
 				}
 
 				if (!parsed.ok) {
-					finish(new Error(parsed.error.message));
+					finish(new DaemonError(parsed.error.message, parsed.error.code));
 					return;
 				}
 

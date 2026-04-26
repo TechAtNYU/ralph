@@ -371,6 +371,16 @@ export class StateStore {
 		return this.stmts;
 	}
 
+	private requireOpen(): {
+		db: Database;
+		stmts: NonNullable<StateStore["stmts"]>;
+	} {
+		if (!this.db || !this.stmts) {
+			throw new Error("StateStore is not open; call open() first");
+		}
+		return { db: this.db, stmts: this.stmts };
+	}
+
 	// --------------------------------------------------------------------
 	// Instances
 	// --------------------------------------------------------------------
@@ -648,15 +658,16 @@ export class StateStore {
 		session: JobSession;
 		task: JobTask;
 	}): DaemonJob {
+		const { db, stmts } = this.requireOpen();
 		const now = new Date().toISOString();
 		const jobId = randomUUID();
 
-		this.db?.transaction(() => {
+		db.transaction(() => {
 			const { id: sessionRowId } = this.upsertSessionForSubmit(
 				input.instanceId,
 				input.session,
 			);
-			this.s().insertJob.run({
+			stmts.insertJob.run({
 				$id: jobId,
 				$instance_id: input.instanceId,
 				$session_id: sessionRowId,
@@ -730,11 +741,12 @@ export class StateStore {
 	 * the ids of jobs that should be re-queued for scheduling.
 	 */
 	recoverForBootstrap(): Array<{ id: string; instanceId: string }> {
+		const { db, stmts } = this.requireOpen();
 		const now = new Date().toISOString();
 		let requeued: Array<{ id: string; instance_id: string }> = [];
-		this.db?.transaction(() => {
-			this.s().resetInstancesToStopped.run({ $updated_at: now });
-			requeued = this.s().requeueRunningJobs.all(now);
+		db.transaction(() => {
+			stmts.resetInstancesToStopped.run({ $updated_at: now });
+			requeued = stmts.requeueRunningJobs.all(now);
 		})();
 		return requeued.map((r) => ({ id: r.id, instanceId: r.instance_id }));
 	}

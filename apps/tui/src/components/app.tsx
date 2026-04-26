@@ -170,11 +170,14 @@ function Dashboard({
 					// If the selected instance was removed between `listInstances`
 					// and this call, the daemon now throws `not_found` instead of
 					// returning an empty list. Swallow that narrow race so the
-					// whole refresh doesn't fail.
+					// whole refresh doesn't fail. Any other error is a real failure
+					// and should propagate to the surrounding catch block.
 					selectedInst
-						? daemon
-								.listSessions(selectedInst.id)
-								.catch(() => ({ sessions: [] }))
+						? daemon.listSessions(selectedInst.id).catch((err) => {
+								const code = (err as { code?: string } | undefined)?.code;
+								if (code === "not_found") return { sessions: [] };
+								throw err;
+							})
 						: Promise.resolve({ sessions: [] }),
 				]);
 				setSelectedIndex(safeIndex);

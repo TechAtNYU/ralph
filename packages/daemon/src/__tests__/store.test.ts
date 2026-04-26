@@ -6,6 +6,34 @@ import { join } from "node:path";
 
 import { StateStore, StoreError } from "../store";
 
+describe("StateStore — unopened guard", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await mkdtemp(join(tmpdir(), "ralph-test-"));
+	});
+
+	afterEach(async () => {
+		await rm(tmpDir, { recursive: true, force: true });
+	});
+
+	test("createJob throws when store is not open", () => {
+		const fresh = new StateStore(join(tmpDir, "unopened.sqlite"));
+		expect(() =>
+			fresh.createJob({
+				instanceId: "x",
+				session: { type: "new" },
+				task: { type: "prompt", prompt: "hi" },
+			}),
+		).toThrow(/not open/);
+	});
+
+	test("recoverForBootstrap throws when store is not open", () => {
+		const fresh = new StateStore(join(tmpDir, "unopened.sqlite"));
+		expect(() => fresh.recoverForBootstrap()).toThrow(/not open/);
+	});
+});
+
 describe("StateStore", () => {
 	let tmpDir: string;
 	let databasePath: string;
