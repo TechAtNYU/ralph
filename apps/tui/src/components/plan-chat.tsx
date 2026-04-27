@@ -67,9 +67,6 @@ export function PlanChat({
 
 	useKeyboard((key) => {
 		if (!focused) return;
-		if (key.name === "t" && key.ctrl) {
-			onToggleTasks();
-		}
 		if (key.name === "tab" && showCommandPalette && !showFilePicker) {
 			const idx = Math.min(pickerIndex, filteredCommands.length - 1);
 			const cmd = filteredCommands[idx];

@@ -287,7 +287,7 @@ export function PlanView({
 				/>
 			)}
 
-			{showTasks && planData.hasPrd && (
+			{showTasks && (
 				<TaskOverlay
 					focused={focused && showTasks}
 					data={planData}

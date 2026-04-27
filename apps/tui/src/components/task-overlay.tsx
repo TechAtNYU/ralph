@@ -21,7 +21,7 @@ export function TaskOverlay({ focused, data, onClose }: TaskOverlayProps) {
 
 	useKeyboard((key) => {
 		if (!focused) return;
-		if (key.name === "escape" || (key.name === "t" && key.ctrl)) {
+		if (key.name === "escape") {
 			onClose();
 			return;
 		}
@@ -51,22 +51,28 @@ export function TaskOverlay({ focused, data, onClose }: TaskOverlayProps) {
 			padding={1}
 		>
 			<scrollbox flexGrow={1} minHeight={0}>
-				{tasks.map((task: PrdTask, index: number) => {
-					const isSelected = focused && index === selectedIndex;
-					const icon = task.passed ? "✓" : "○";
+				{tasks.length > 0 ? (
+					tasks.map((task: PrdTask, index: number) => {
+						const isSelected = focused && index === selectedIndex;
+						const icon = task.passed ? "✓" : "○";
 
-					return (
-						<box key={task.description} flexDirection="row">
-							<text fg={task.passed ? "green" : "#666666"}>{`${icon} `}</text>
-							<text
-								fg={isSelected ? "white" : task.passed ? "#666666" : "#cccccc"}
-								attributes={isSelected ? TextAttributes.BOLD : undefined}
-							>
-								{task.description}
-							</text>
-						</box>
-					);
-				})}
+						return (
+							<box key={task.description} flexDirection="row">
+								<text fg={task.passed ? "green" : "#666666"}>{`${icon} `}</text>
+								<text
+									fg={
+										isSelected ? "white" : task.passed ? "#666666" : "#cccccc"
+									}
+									attributes={isSelected ? TextAttributes.BOLD : undefined}
+								>
+									{task.description}
+								</text>
+							</box>
+						);
+					})
+				) : (
+					<text attributes={TextAttributes.DIM}>No prd.json generated yet</text>
+				)}
 			</scrollbox>
 
 			<box height={1} marginTop={1}>
