@@ -29,7 +29,7 @@ export interface OpencodeSessionClient {
 		system?: string;
 		variant?: string;
 		parts?: Array<TextPartInput>;
-	}): Promise<{ info: AssistantMessage; parts: Part[] }>;
+	}): Promise<{ info?: AssistantMessage; parts?: Part[] }>;
 	abort(parameters: {
 		sessionID: string;
 		directory?: string;
@@ -201,45 +201,36 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 							client.session.abort(parameters, {
 								throwOnError: true,
 							}),
-						},
-						provider: {
-							list: async (parameters) => {
-								const response = await client.provider.list(parameters, {
-									throwOnError: true,
-								});
-								return {
-									providers: response.data.all.map((p) => ({
-										id: p.id,
-										name: p.name,
-										models: Object.fromEntries(
-											Object.entries(p.models).map(([k, rawModel]) => {
-												const m = rawModel as RawProviderModel;
-												return [
-													k,
-													{
-														id: m.id,
-														name: m.name,
-														family: m.family,
-														attachment:
-															m.attachment ?? m.capabilities?.attachment,
-														reasoning: m.reasoning ?? m.capabilities?.reasoning,
-														tool_call: m.tool_call ?? m.capabilities?.toolcall,
-													},
-												];
-											}),
-										),
-									})),
-									connected: response.data.connected,
-								};
-							},
-						},
-						async ping() {
-							try {
-								await client.path.get({}, { throwOnError: true });
-								return true;
-							} catch {
-								return false;
-							}
+					},
+					provider: {
+						list: async (parameters) => {
+							const response = await client.provider.list(parameters, {
+								throwOnError: true,
+							});
+							return {
+								providers: response.data.all.map((p) => ({
+									id: p.id,
+									name: p.name,
+									models: Object.fromEntries(
+										Object.entries(p.models).map(([k, rawModel]) => {
+											const m = rawModel as RawProviderModel;
+											return [
+												k,
+												{
+													id: m.id,
+													name: m.name,
+													family: m.family,
+													attachment:
+														m.attachment ?? m.capabilities?.attachment,
+													reasoning: m.reasoning ?? m.capabilities?.reasoning,
+													tool_call: m.tool_call ?? m.capabilities?.toolcall,
+												},
+											];
+										}),
+									),
+								})),
+								connected: response.data.connected,
+							};
 						},
 					},
 					async ping() {

@@ -20,6 +20,7 @@ type FocusZone = "tabs" | "content";
 interface ActiveChat {
 	instanceId: string;
 	instanceName: string;
+	sessionId: string | null;
 }
 
 const TAB_OPTIONS = [
@@ -101,6 +102,7 @@ export function App({ onQuit }: AppProps) {
 			<Chat
 				instanceId={activeChat.instanceId}
 				instanceName={activeChat.instanceName}
+				sessionId={activeChat.sessionId}
 				onBack={() => setActiveChat(null)}
 				onQuit={onQuit}
 			/>
@@ -149,7 +151,7 @@ export function App({ onQuit }: AppProps) {
 						focused={contentFocused && activeTab === 1}
 						planData={planFiles.data}
 						onOpenChat={(instanceId, instanceName) =>
-							setActiveChat({ instanceId, instanceName })
+							setActiveChat({ instanceId, instanceName, sessionId: null })
 						}
 					/>
 				</box>

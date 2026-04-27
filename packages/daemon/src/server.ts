@@ -208,7 +208,7 @@ export class Daemon {
 	private readonly cancelWaitTimeoutMs: number;
 	private readonly sessionIdleWaiters = new Map<string, () => void>();
 	private readonly sessionErrors = new Map<string, string>();
-	private readonly pendingPermissions = new Map<string, Array<{ permission: string; pattern: string; action: string }>>();
+	private readonly pendingPermissions = new Map<string, Array<{ permission: string; pattern: string; action: "allow" | "deny" | "ask" }>>();
 
 	constructor(
 		private readonly store: StateStore,
@@ -470,21 +470,21 @@ export class Daemon {
 		}
 
 		const { instanceId } = request.params;
-		this.store.assertInstance(this.state, instanceId);
+		this.store.assertInstance(instanceId);
 
-		const now = new Date().toISOString();
-		const job: DaemonJob = {
-			id: randomUUID(),
+		const job = this.store.createJob({
 			instanceId,
 			session: request.params.session,
 			task: request.params.task,
-			state: "queued",
-			createdAt: now,
-			updatedAt: now,
-		};
-		this.state = this.store.upsertJob(this.state, job);
-		this.enqueue(job);
-		await this.store.save(this.state);
+		});
+		if (
+			request.params.session.type === "new" &&
+			request.params.session.permission
+		) {
+			this.pendingPermissions.set(job.id, request.params.session.permission);
+		}
+		this.enqueueById(instanceId, job.id);
+		this.scheduleDrain();
 		return { job };
 	}
 
@@ -816,7 +816,9 @@ export class Daemon {
 					if (!current?.outputText || current.outputText.length === 0) {
 						patch.outputText = finalText;
 					}
-					if (!patch.outputText || patch.outputText.length === 0) {
+					const hasOutput = (patch.outputText && patch.outputText.length > 0) ||
+						(current?.outputText && current.outputText.length > 0);
+					if (!hasOutput) {
 						log("prompt sent, awaiting idle");
 						try {
 							await Promise.race([
@@ -852,7 +854,7 @@ export class Daemon {
 						patch.error = controller.signal.aborted
 							? "Job cancelled"
 							: sessionError;
-					} else if (!patch.outputText?.trim() && !current?.outputText?.trim()) {
+					} else if (!hasOutput) {
 						terminalState = controller.signal.aborted
 							? "cancelled"
 							: "failed";
