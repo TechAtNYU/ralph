@@ -208,7 +208,14 @@ export class Daemon {
 	private readonly cancelWaitTimeoutMs: number;
 	private readonly sessionIdleWaiters = new Map<string, () => void>();
 	private readonly sessionErrors = new Map<string, string>();
-	private readonly pendingPermissions = new Map<string, Array<{ permission: string; pattern: string; action: "allow" | "deny" | "ask" }>>();
+	private readonly pendingPermissions = new Map<
+		string,
+		Array<{
+			permission: string;
+			pattern: string;
+			action: "allow" | "deny" | "ask";
+		}>
+	>();
 
 	constructor(
 		private readonly store: StateStore,
@@ -816,7 +823,8 @@ export class Daemon {
 					if (!current?.outputText || current.outputText.length === 0) {
 						patch.outputText = finalText;
 					}
-					const hasOutput = (patch.outputText && patch.outputText.length > 0) ||
+					const hasOutput =
+						(patch.outputText && patch.outputText.length > 0) ||
 						(current?.outputText && current.outputText.length > 0);
 					if (!hasOutput) {
 						log("prompt sent, awaiting idle");
@@ -848,16 +856,12 @@ export class Daemon {
 					}
 					const sessionError = this.sessionErrors.get(sessionId);
 					if (sessionError) {
-						terminalState = controller.signal.aborted
-							? "cancelled"
-							: "failed";
+						terminalState = controller.signal.aborted ? "cancelled" : "failed";
 						patch.error = controller.signal.aborted
 							? "Job cancelled"
 							: sessionError;
 					} else if (!hasOutput) {
-						terminalState = controller.signal.aborted
-							? "cancelled"
-							: "failed";
+						terminalState = controller.signal.aborted ? "cancelled" : "failed";
 						patch.error = controller.signal.aborted
 							? "Job cancelled"
 							: "OpenCode returned no response. Check provider credentials and model availability.";
