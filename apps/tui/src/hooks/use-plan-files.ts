@@ -8,6 +8,7 @@ export type { PrdTask } from "../lib/plan-validation";
 export interface PlanFilesData {
 	tasks: PrdTask[];
 	progress: string;
+	specContent: string;
 	hasSpec: boolean;
 	hasPrd: boolean;
 	specError?: string;
@@ -37,6 +38,7 @@ export function usePlanFiles(scaffoldPath: string | null): UsePlanFilesReturn {
 	const [data, setData] = useState<PlanFilesData>({
 		tasks: [],
 		progress: "",
+		specContent: "",
 		hasSpec: false,
 		hasPrd: false,
 	});
@@ -49,6 +51,7 @@ export function usePlanFiles(scaffoldPath: string | null): UsePlanFilesReturn {
 			setData({
 				tasks: [],
 				progress: "",
+				specContent: "",
 				hasSpec: false,
 				hasPrd: false,
 			});
@@ -67,6 +70,7 @@ export function usePlanFiles(scaffoldPath: string | null): UsePlanFilesReturn {
 			setData({
 				tasks: prdResult.tasks,
 				progress: progressContent ?? "",
+				specContent: specContent ?? "",
 				hasSpec: specContent !== null && specResult.valid,
 				hasPrd: prdContent !== null && !prdResult.error,
 				specError:

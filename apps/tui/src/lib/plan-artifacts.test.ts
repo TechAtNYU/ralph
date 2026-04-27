@@ -59,6 +59,25 @@ Build a browser todo app that lets one person add, complete, and delete tasks wh
 		).rejects.toThrow("printed a tool call");
 	});
 
+	it("accepts a single fenced markdown SPEC block", async () => {
+		const scaffold = await tempScaffold();
+		const spec = `# Todo App
+
+> A small task manager for personal use.
+
+## Overview
+Build a browser todo app that lets one person add, complete, and delete tasks while keeping state locally.
+
+## Scope
+- Add tasks
+- Complete tasks
+- Delete tasks`;
+
+		await writeSpecArtifact(scaffold, ["```markdown", spec, "```"].join("\n"));
+
+		expect(await readFile(join(scaffold, "SPEC.md"), "utf8")).toBe(`${spec}\n`);
+	});
+
 	it("writes valid PRD JSON and normalizes formatting", async () => {
 		const scaffold = await tempScaffold();
 		const prd = `{"tasks":[{"description":"Build task storage","subtasks":["Create storage helper","Run tests"]}]}`;

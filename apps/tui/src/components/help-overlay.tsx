@@ -19,6 +19,7 @@ const GENERAL_BINDINGS: KeyBinding[] = [
 ];
 
 const PLAN_BINDINGS: KeyBinding[] = [
+	{ keys: "Ctrl+S", desc: "Toggle SPEC.md viewer" },
 	{ keys: "Ctrl+T", desc: "Toggle task list" },
 	{ keys: "@", desc: "Insert file reference" },
 	{ keys: "/", desc: "Open command palette" },

@@ -10,6 +10,7 @@ import { writePrdArtifact, writeSpecArtifact } from "../lib/plan-artifacts";
 import type { Skill, SkillContext } from "../skills";
 import { ContextSidebar } from "./context-sidebar";
 import { PlanChat } from "./plan-chat";
+import { SpecOverlay } from "./spec-overlay";
 import { TaskOverlay } from "./task-overlay";
 
 const SIDEBAR_MIN_WIDTH = 120;
@@ -68,6 +69,7 @@ export function PlanView({
 	planInstance,
 }: PlanViewProps) {
 	const [showTasks, setShowTasks] = useState(false);
+	const [showSpec, setShowSpec] = useState(false);
 	const { activeSkill, skill, startSkill } = useSkill();
 	const { ensure: ensureInstance } = planInstance;
 	const ensureInstanceId = useCallback(
@@ -78,35 +80,44 @@ export function PlanView({
 	const { width } = useTerminalDimensions();
 	const showSidebar = width >= SIDEBAR_MIN_WIDTH;
 
-	const { hasSpec, hasPrd, tasks, specError, prdError } = planData;
-	const prevHasSpec = useRef(hasSpec);
-	const prevHasPrd = useRef(hasPrd);
+	const { hasSpec, hasPrd, specError, prdError } = planData;
 	const prevLoading = useRef(chat.loading);
+	const brainstormHintShown = useRef(false);
 	const { addSystemMessage, loading: chatLoading } = chat;
 
 	useEffect(() => {
-		if (!prevHasSpec.current && hasSpec && activeSkill) {
-			addSystemMessage(
-				"wrote SPEC.md — type /prd to generate the task breakdown",
-			);
+		if (!activeSkill) {
+			startSkill("brainstorm");
 		}
-		prevHasSpec.current = hasSpec;
-	}, [hasSpec, activeSkill, addSystemMessage]);
+	}, [activeSkill, startSkill]);
 
 	useEffect(() => {
-		if (!prevHasPrd.current && hasPrd && activeSkill) {
-			const n = tasks.length;
-			addSystemMessage(
-				`wrote prd.json (${n} task${n === 1 ? "" : "s"}) — press Ctrl+T to review, then switch to Execute`,
-			);
+		if (
+			activeSkill !== "brainstorm" ||
+			chatLoading ||
+			brainstormHintShown.current
+		) {
+			return;
 		}
-		prevHasPrd.current = hasPrd;
-	}, [hasPrd, tasks.length, activeSkill, addSystemMessage]);
+		const hasAssistantReply = chat.messages.some(
+			(message) => message.role === "assistant" && message.content.trim(),
+		);
+		if (!hasAssistantReply) return;
+
+		brainstormHintShown.current = true;
+		addSystemMessage("Type /spec when you're ready to generate the spec.");
+	}, [activeSkill, chatLoading, chat.messages, addSystemMessage]);
 
 	useEffect(() => {
 		const wasLoading = prevLoading.current;
 		prevLoading.current = chatLoading;
-		if (!wasLoading || chatLoading || !activeSkill) return;
+		if (
+			!wasLoading ||
+			chatLoading ||
+			(activeSkill !== "spec" && activeSkill !== "prd")
+		) {
+			return;
+		}
 
 		const target = activeSkill;
 		const timeoutId = setTimeout(() => {
@@ -167,7 +178,6 @@ export function PlanView({
 
 	const handleStartSkill = async (id: "spec" | "prd") => {
 		const s = startSkill(id);
-		chatClear();
 		if (!s.buildAutoPrompt) return;
 		const { scaffoldPath } = await ensureInstance();
 		const ctx: SkillContext = { scaffoldPath };
@@ -178,16 +188,28 @@ export function PlanView({
 			addSystemMessage(
 				`SPEC.md: ${e instanceof Error ? e.message : "failed to read file"}`,
 			);
+			startSkill("brainstorm");
 			return;
 		}
 		const result = await chatSend({
 			prompt,
 			systemPrompt: s.buildSystemPrompt(ctx),
 			permission: s.buildPermission(ctx),
+			displayAssistant: false,
+			displayUser: false,
 		});
-		if (!result?.content) return;
 		try {
+			if (!result?.content) return;
 			await writeSkillArtifact(s, ctx, result.content);
+			if (s.id === "spec") {
+				addSystemMessage(
+					"SPEC.md generated. Press Ctrl+S to view. Type /prd when ready.",
+				);
+			} else {
+				addSystemMessage(
+					"prd.json generated. Press Ctrl+T to review tasks, then switch to Execute.",
+				);
+			}
 		} catch (e) {
 			const filename = s.id === "spec" ? "SPEC.md" : "prd.json";
 			const reason =
@@ -195,32 +217,55 @@ export function PlanView({
 			addSystemMessage(
 				`${filename}: generated response was invalid (${reason})`,
 			);
+		} finally {
+			startSkill("brainstorm");
 		}
 	};
 
 	useKeyboard((key) => {
 		if (!focused) return;
 		if (key.name === "t" && key.ctrl) {
-			setShowTasks((s) => !s);
+			setShowTasks((s) => {
+				const next = !s;
+				if (next) setShowSpec(false);
+				return next;
+			});
+		}
+		if (key.name === "s" && key.ctrl) {
+			setShowSpec((s) => {
+				const next = !s;
+				if (next) setShowTasks(false);
+				return next;
+			});
 		}
 	});
 
 	const toggleTasks = () => {
-		setShowTasks((s) => !s);
+		setShowTasks((s) => {
+			const next = !s;
+			if (next) setShowSpec(false);
+			return next;
+		});
+	};
+
+	const handleClear = () => {
+		brainstormHintShown.current = false;
+		chatClear();
+		startSkill("brainstorm");
 	};
 
 	return (
 		<box flexDirection="column" flexGrow={1}>
 			<box flexDirection="row" flexGrow={1}>
 				<PlanChat
-					focused={focused && !showTasks}
+					focused={focused && !showTasks && !showSpec}
 					messages={chat.messages}
 					loading={chat.loading}
 					error={chat.error ?? planInstance.error}
 					daemonOnline={daemonOnline}
 					onSendPrompt={sendWithSkill}
 					onToggleTasks={toggleTasks}
-					onClear={chat.clear}
+					onClear={handleClear}
 					onStartSkill={handleStartSkill}
 					skill={skill}
 				/>
@@ -233,6 +278,14 @@ export function PlanView({
 					/>
 				)}
 			</box>
+
+			{showSpec && (
+				<SpecOverlay
+					focused={focused && showSpec}
+					data={planData}
+					onClose={() => setShowSpec(false)}
+				/>
+			)}
 
 			{showTasks && planData.hasPrd && (
 				<TaskOverlay

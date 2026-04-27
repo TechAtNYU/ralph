@@ -25,6 +25,15 @@ function extractPrdJson(content: string): string {
 	throw new Error("response must be raw JSON or a single fenced json block");
 }
 
+function extractSpecMarkdown(content: string): string {
+	const trimmed = normalizeModelOutput(content);
+	const fenced = trimmed.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i);
+	if (fenced?.[1]) {
+		return fenced[1].trim();
+	}
+	return trimmed;
+}
+
 async function writeArtifact(path: string, content: string): Promise<void> {
 	await mkdir(dirname(path), { recursive: true });
 	await writeFile(path, content, "utf8");
@@ -34,7 +43,7 @@ export async function writeSpecArtifact(
 	scaffoldPath: string,
 	content: string,
 ): Promise<void> {
-	const spec = normalizeModelOutput(content);
+	const spec = extractSpecMarkdown(content);
 	const validation = validateSpec(spec);
 	if (!validation.valid) {
 		throw new Error(validation.error ?? "invalid SPEC.md");

@@ -1,10 +1,15 @@
 import { useCallback, useState } from "react";
-import { type ActiveSkill, getSkill, type Skill } from "../skills";
+import {
+	type ActiveSkill,
+	getSkill,
+	type Skill,
+	type SkillId,
+} from "../skills";
 
 interface UseSkillReturn {
 	activeSkill: ActiveSkill;
 	skill: Skill | undefined;
-	startSkill: (id: "spec" | "prd") => Skill;
+	startSkill: (id: SkillId) => Skill;
 	clearSkill: () => void;
 }
 
@@ -13,7 +18,7 @@ export function useSkill(): UseSkillReturn {
 
 	const skill = activeSkill ? getSkill(activeSkill) : undefined;
 
-	const startSkill = useCallback((id: "spec" | "prd"): Skill => {
+	const startSkill = useCallback((id: SkillId): Skill => {
 		const s = getSkill(id);
 		if (!s) throw new Error(`Unknown skill: ${id}`);
 		setActiveSkill(id);

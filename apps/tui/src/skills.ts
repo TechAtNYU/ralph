@@ -4,8 +4,11 @@ export interface SkillContext {
 	scaffoldPath: string;
 }
 
+export type SkillId = "brainstorm" | "spec" | "prd";
+export type ActiveSkill = SkillId | null;
+
 export interface Skill {
-	id: string;
+	id: SkillId;
 	name: string;
 	inputPlaceholder: string;
 	buildSystemPrompt: (ctx: SkillContext) => string;
@@ -13,14 +16,28 @@ export interface Skill {
 	buildAutoPrompt?: (ctx: SkillContext) => string;
 }
 
-export type ActiveSkill = "spec" | "prd" | null;
-
 function buildPlanChatPermissions(_ctx: SkillContext): PermissionRule[] {
 	return [
 		{ permission: "question", pattern: "*", action: "deny" },
 		{ permission: "*", pattern: "*", action: "deny" },
 	];
 }
+
+export const BRAINSTORM_SKILL: Skill = {
+	id: "brainstorm",
+	name: "Plan",
+	inputPlaceholder: "What do you want to build?",
+	buildPermission: buildPlanChatPermissions,
+	buildSystemPrompt: () => `You are a project planning partner.
+
+RULES:
+- Help the user refine what they want to build through natural conversation.
+- Ask concise clarifying questions when useful.
+- Offer concrete product, scope, architecture, and implementation tradeoffs.
+- Do NOT create or modify files.
+- Do NOT call tools. Do NOT print pseudo tool calls such as \`<tool_call>write(...)\`.
+- When the idea is clear enough, mention that the user can type \`/spec\` to generate the project spec.`,
+};
 
 export const SPEC_SKILL: Skill = {
 	id: "spec",
@@ -34,7 +51,7 @@ export const SPEC_SKILL: Skill = {
 RULES:
 - Return ONLY the markdown content for \`SPEC.md\`.
 - Do NOT call tools. Do NOT print pseudo tool calls such as \`<tool_call>write(...)\`.
-- Ask the user 2-3 brief clarifying questions about what they're building, then write the spec. If the description is already clear, skip questions and write immediately.
+- Use the conversation context above. Do NOT ask more questions — generate immediately.
 - Do NOT include commentary before or after the markdown.
 
 TARGET FILE (absolute path):
@@ -64,6 +81,8 @@ SPEC.md TEMPLATE:
 
 ## Constraints
 - [Non-functional requirements that guide decisions]`,
+	buildAutoPrompt: () =>
+		"Based on our conversation, generate final SPEC.md. Return markdown only.",
 };
 
 export const PRD_SKILL: Skill = {
@@ -116,11 +135,12 @@ SUBTASK SPECIFICITY:
 - BAD: "Create user model"`,
 };
 
-const SKILLS: Record<string, Skill> = {
+const SKILLS: Record<SkillId, Skill> = {
+	brainstorm: BRAINSTORM_SKILL,
 	spec: SPEC_SKILL,
 	prd: PRD_SKILL,
 };
 
-export function getSkill(id: string): Skill | undefined {
+export function getSkill(id: SkillId): Skill | undefined {
 	return SKILLS[id];
 }

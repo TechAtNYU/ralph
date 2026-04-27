@@ -12,6 +12,8 @@ export interface SendOptions {
 	prompt: string;
 	systemPrompt: string;
 	permission?: PermissionRule[];
+	displayAssistant?: boolean;
+	displayUser?: boolean;
 }
 
 export interface SendResult {
@@ -57,10 +59,18 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 	);
 
 	const send = useCallback(
-		async ({ prompt, systemPrompt, permission }: SendOptions) => {
+		async ({
+			prompt,
+			systemPrompt,
+			permission,
+			displayAssistant = true,
+			displayUser = true,
+		}: SendOptions) => {
 			if (loading) return undefined;
 
-			setMessages((prev) => [...prev, { role: "user", content: prompt }]);
+			if (displayUser) {
+				setMessages((prev) => [...prev, { role: "user", content: prompt }]);
+			}
 			setLoading(true);
 			setError(undefined);
 			cancelledRef.current = false;
@@ -82,7 +92,9 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 					},
 				});
 
-				setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+				if (displayAssistant) {
+					setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+				}
 				let content = "";
 
 				for await (const event of events) {
@@ -90,10 +102,14 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 
 					if (event.type === "snapshot") {
 						content = event.text;
-						updateLastMessage(() => ({ role: "assistant", content }));
+						if (displayAssistant) {
+							updateLastMessage(() => ({ role: "assistant", content }));
+						}
 					} else if (event.type === "delta" && event.field === "text") {
 						content += event.delta;
-						updateLastMessage(() => ({ role: "assistant", content }));
+						if (displayAssistant) {
+							updateLastMessage(() => ({ role: "assistant", content }));
+						}
 					} else if (event.type === "done") {
 						if (event.job.sessionId) {
 							sessionIdRef.current = event.job.sessionId;
@@ -101,10 +117,12 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 						if (event.job.state === "failed") {
 							const message = event.job.error || "Job failed";
 							setError(message);
-							updateLastMessage(() => ({
-								role: "system",
-								content: `Error: ${message}`,
-							}));
+							if (displayAssistant) {
+								updateLastMessage(() => ({
+									role: "system",
+									content: `Error: ${message}`,
+								}));
+							}
 							return undefined;
 						}
 						if (event.job.state !== "succeeded") {
@@ -113,18 +131,22 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 						let final = content.trim();
 						if (!content.trim()) {
 							final = event.job.outputText?.trim() || "";
-							updateLastMessage(() => ({
-								role: "assistant",
-								content: final || "(empty response)",
-							}));
+							if (displayAssistant) {
+								updateLastMessage(() => ({
+									role: "assistant",
+									content: final || "(empty response)",
+								}));
+							}
 						}
 						return { content: final, job: event.job };
 					} else if (event.type === "error") {
 						setError(event.error);
-						updateLastMessage(() => ({
-							role: "system",
-							content: `Error: ${event.error}`,
-						}));
+						if (displayAssistant) {
+							updateLastMessage(() => ({
+								role: "system",
+								content: `Error: ${event.error}`,
+							}));
+						}
 						return undefined;
 					}
 				}

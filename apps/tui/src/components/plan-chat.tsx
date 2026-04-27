@@ -5,7 +5,7 @@ import { useKeyboard } from "@opentui/react";
 import { useMemo, useState } from "react";
 import type { ChatMessage } from "../hooks/use-chat";
 import { useFileSearch } from "../hooks/use-file-search";
-import type { Skill } from "../skills";
+import type { Skill, SkillId } from "../skills";
 import { CommandPalette, filterCommands } from "./command-palette";
 import { FILE_PICKER_VISIBLE_COUNT, FilePicker } from "./file-picker";
 import { WelcomeScreen } from "./welcome-screen";
@@ -19,7 +19,7 @@ interface PlanChatProps {
 	onSendPrompt: (prompt: string) => Promise<void>;
 	onToggleTasks: () => void;
 	onClear: () => void;
-	onStartSkill: (id: "spec" | "prd") => void;
+	onStartSkill: (id: Extract<SkillId, "spec" | "prd">) => void;
 	skill: Skill | undefined;
 }
 
@@ -123,7 +123,7 @@ export function PlanChat({
 
 	const executeCommand = (cmdName: string) => {
 		if (cmdName === "/spec" || cmdName === "/prd") {
-			onStartSkill(cmdName.slice(1) as "spec" | "prd");
+			onStartSkill(cmdName.slice(1) as Extract<SkillId, "spec" | "prd">);
 			setInputValue("");
 			return;
 		}
@@ -164,19 +164,15 @@ export function PlanChat({
 			return;
 		}
 
-		if (!skill) return;
-
 		const prompt = buildPrompt(trimmed);
 		setInputValue("");
 		setFileRefs([]);
 		void onSendPrompt(prompt);
 	};
 
-	const placeholder = !skill
-		? "Type /spec or /prd to start..."
-		: loading
-			? "Waiting for response..."
-			: skill.inputPlaceholder;
+	const placeholder = loading
+		? "Waiting for response..."
+		: (skill?.inputPlaceholder ?? "What do you want to build?");
 
 	return (
 		<box flexDirection="column" flexGrow={1}>

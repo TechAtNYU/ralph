@@ -6,7 +6,7 @@ export interface SlashCommand {
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
-	{ name: "/spec", description: "Write project spec (.ralph/SPEC.md)" },
+	{ name: "/spec", description: "Generate project spec (.ralph/SPEC.md)" },
 	{ name: "/prd", description: "Create task breakdown (.ralph/prd.json)" },
 	{ name: "/tasks", description: "Toggle task overlay" },
 	{ name: "/clear", description: "Clear chat messages" },

@@ -6,6 +6,25 @@ interface WelcomeScreenProps {
 }
 
 export function WelcomeScreen({ skill }: WelcomeScreenProps) {
+	if (skill?.id === "brainstorm") {
+		return (
+			<box
+				flexDirection="column"
+				flexGrow={1}
+				alignItems="center"
+				justifyContent="center"
+			>
+				<text attributes={TextAttributes.BOLD}>Plan</text>
+				<text attributes={TextAttributes.DIM} marginTop={1}>
+					Describe what you want to build.
+				</text>
+				<text attributes={TextAttributes.DIM}>
+					When ready, type /spec to generate the spec.
+				</text>
+			</box>
+		);
+	}
+
 	if (skill) {
 		return (
 			<box
@@ -39,7 +58,7 @@ export function WelcomeScreen({ skill }: WelcomeScreenProps) {
 				<box flexDirection="row">
 					<text fg="cyan">/spec</text>
 					<text attributes={TextAttributes.DIM}>
-						{"   Write project spec (.ralph/SPEC.md)"}
+						{"   Generate project spec (.ralph/SPEC.md)"}
 					</text>
 				</box>
 				<box flexDirection="row">
