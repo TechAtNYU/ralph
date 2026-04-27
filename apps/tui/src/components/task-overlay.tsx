@@ -39,7 +39,9 @@ export function TaskOverlay({ focused, data, onClose }: TaskOverlayProps) {
 			right={1}
 			top={0}
 			bottom={3}
+			zIndex={10}
 			width="40%"
+			backgroundColor="black"
 			border={true}
 			borderStyle="rounded"
 			borderColor="#555555"

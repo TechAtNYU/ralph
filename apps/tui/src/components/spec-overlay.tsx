@@ -25,7 +25,9 @@ export function SpecOverlay({ focused, data, onClose }: SpecOverlayProps) {
 			right={1}
 			top={0}
 			bottom={3}
+			zIndex={10}
 			width="50%"
+			backgroundColor="black"
 			border={true}
 			borderStyle="rounded"
 			borderColor="#555555"
