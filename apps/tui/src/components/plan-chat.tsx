@@ -202,7 +202,7 @@ export function PlanChat({
 									fg={msg.role === "user" ? "brightWhite" : "cyan"}
 									attributes={TextAttributes.BOLD}
 								>
-									{msg.role === "user" ? "You" : "Assistant"}
+									{msg.role === "user" ? "You" : "Ralph"}
 								</text>
 								{msg.role === "assistant" ? (
 									<markdown content={msg.content} syntaxStyle={syntaxStyle} />
