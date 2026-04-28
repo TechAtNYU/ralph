@@ -152,8 +152,8 @@ export function App({ onQuit }: AppProps) {
 						planData={planFiles.data}
 						planInstance={planInstance}
 						onPlanRefresh={planFiles.refresh}
-						onOpenChat={(instanceId, instanceName) =>
-							setActiveChat({ instanceId, instanceName, sessionId: null })
+						onOpenChat={(instanceId, instanceName, sessionId = null) =>
+							setActiveChat({ instanceId, instanceName, sessionId })
 						}
 					/>
 				</box>
