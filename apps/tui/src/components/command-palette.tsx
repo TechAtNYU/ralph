@@ -30,15 +30,13 @@ export function CommandPalette({
 	if (filtered.length === 0) {
 		return (
 			<box
-				position="absolute"
-				bottom={4}
-				left={0}
 				width="40%"
 				border={true}
 				borderStyle="rounded"
 				borderColor="cyan"
 				title="Commands"
 				height={3}
+				flexShrink={0}
 			>
 				<text attributes={TextAttributes.DIM} paddingLeft={1}>
 					No matching commands
@@ -51,9 +49,6 @@ export function CommandPalette({
 
 	return (
 		<box
-			position="absolute"
-			bottom={4}
-			left={0}
 			width="40%"
 			border={true}
 			borderStyle="rounded"
@@ -61,6 +56,7 @@ export function CommandPalette({
 			title="Commands"
 			maxHeight={8}
 			flexDirection="column"
+			flexShrink={0}
 		>
 			{filtered.map((cmd, index) => (
 				<box key={cmd.name} flexDirection="row" paddingLeft={1}>

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useChat } from "../hooks/use-chat";
+import { type ChatMessage, useChat } from "../hooks/use-chat";
 import type { PlanFilesData } from "../hooks/use-plan-files";
 import type { usePlanInstance } from "../hooks/use-plan-instance";
 import { useSkill } from "../hooks/use-skill";
@@ -46,6 +46,28 @@ SPEC.md:
 \`\`\`markdown
 ${spec}
 \`\`\``;
+}
+
+export function buildConversationTranscript(messages: ChatMessage[]): string {
+	return messages
+		.filter((message) => message.role !== "system" && message.content.trim())
+		.map((message) => {
+			const speaker = message.role === "user" ? "User" : "Ralph";
+			return `${speaker}: ${message.content.trim()}`;
+		})
+		.join("\n\n");
+}
+
+export function addTranscriptToPrompt(
+	prompt: string,
+	messages: ChatMessage[],
+): string {
+	const transcript = buildConversationTranscript(messages);
+	if (!transcript) return prompt;
+	return `${prompt}
+
+Conversation transcript:
+${transcript}`;
 }
 
 async function writeSkillArtifact(
@@ -160,10 +182,21 @@ export function PlanView({
 				prompt: finalPrompt,
 				systemPrompt: skill.buildSystemPrompt(ctx),
 				permission: skill.buildPermission(ctx),
+				displayAssistant: skill.id === "brainstorm",
+				sessionMode: skill.id === "brainstorm" ? "current" : "ephemeral",
 			});
 			if (!result?.content) return;
 			try {
 				await writeSkillArtifact(skill, ctx, result.content);
+				if (skill.id === "spec") {
+					addSystemMessage(
+						"SPEC.md updated. Press Ctrl+S to view. Type /prd when ready.",
+					);
+				} else if (skill.id === "prd") {
+					addSystemMessage(
+						"prd.json updated. Press Ctrl+T to review tasks, then switch to Execute.",
+					);
+				}
 			} catch (e) {
 				const filename = skill.id === "spec" ? "SPEC.md" : "prd.json";
 				const reason =
@@ -183,7 +216,11 @@ export function PlanView({
 		const ctx: SkillContext = { scaffoldPath };
 		let prompt: string;
 		try {
-			prompt = await buildSkillPrompt(s, ctx, s.buildAutoPrompt(ctx));
+			const autoPrompt =
+				s.id === "spec"
+					? addTranscriptToPrompt(s.buildAutoPrompt(ctx), chat.messages)
+					: s.buildAutoPrompt(ctx);
+			prompt = await buildSkillPrompt(s, ctx, autoPrompt);
 		} catch (e) {
 			addSystemMessage(
 				`SPEC.md: ${e instanceof Error ? e.message : "failed to read file"}`,
@@ -197,6 +234,7 @@ export function PlanView({
 			permission: s.buildPermission(ctx),
 			displayAssistant: false,
 			displayUser: false,
+			sessionMode: "ephemeral",
 		});
 		try {
 			if (!result?.content) return;

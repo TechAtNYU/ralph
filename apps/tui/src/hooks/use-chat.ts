@@ -14,6 +14,7 @@ export interface SendOptions {
 	permission?: PermissionRule[];
 	displayAssistant?: boolean;
 	displayUser?: boolean;
+	sessionMode?: "current" | "ephemeral";
 }
 
 export interface SendResult {
@@ -65,6 +66,7 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 			permission,
 			displayAssistant = true,
 			displayUser = true,
+			sessionMode = "current",
 		}: SendOptions) => {
 			if (loading) return undefined;
 
@@ -78,9 +80,10 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 			try {
 				const instanceId = await ensureInstance();
 
-				const session = sessionIdRef.current
-					? { type: "existing" as const, sessionId: sessionIdRef.current }
-					: { type: "new" as const, title: "Plan", permission };
+				const session =
+					sessionMode === "current" && sessionIdRef.current
+						? { type: "existing" as const, sessionId: sessionIdRef.current }
+						: { type: "new" as const, title: "Plan", permission };
 
 				const { model: storedModel } = await ralphStore.read();
 				const { events } = await daemon.submitAndStreamJob({
@@ -111,7 +114,7 @@ export function useChat(ensureInstance: () => Promise<string>): UseChatReturn {
 							updateLastMessage(() => ({ role: "assistant", content }));
 						}
 					} else if (event.type === "done") {
-						if (event.job.sessionId) {
+						if (sessionMode === "current" && event.job.sessionId) {
 							sessionIdRef.current = event.job.sessionId;
 						}
 						if (event.job.state === "failed") {

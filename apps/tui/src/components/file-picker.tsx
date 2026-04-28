@@ -11,15 +11,13 @@ export function FilePicker({ results, selectedIndex }: FilePickerProps) {
 	if (results.length === 0) {
 		return (
 			<box
-				position="absolute"
-				bottom={4}
-				left={0}
 				width="60%"
 				border={true}
 				borderStyle="rounded"
 				borderColor="cyan"
 				title="Files"
 				height={3}
+				flexShrink={0}
 			>
 				<text attributes={TextAttributes.DIM} paddingLeft={1}>
 					No matching files
@@ -33,9 +31,6 @@ export function FilePicker({ results, selectedIndex }: FilePickerProps) {
 
 	return (
 		<box
-			position="absolute"
-			bottom={4}
-			left={0}
 			width="60%"
 			border={true}
 			borderStyle="rounded"
@@ -43,6 +38,7 @@ export function FilePicker({ results, selectedIndex }: FilePickerProps) {
 			title="Files"
 			maxHeight={12}
 			flexDirection="column"
+			flexShrink={0}
 		>
 			<scrollbox flexGrow={1} minHeight={0}>
 				{visibleResults.map((file, index) => (
