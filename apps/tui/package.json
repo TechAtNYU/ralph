@@ -20,13 +20,18 @@
 		"typescript": "^5"
 	},
 	"dependencies": {
-		"@crustjs/core": "^0.0.13",
+		"@crustjs/core": "^0.0.16",
 		"@crustjs/create": "^0.0.4",
-		"@crustjs/plugins": "^0.0.16",
+		"@crustjs/plugins": "^0.0.21",
+		"@crustjs/progress": "^0.0.2",
+		"@crustjs/prompts": "^0.0.12",
 		"@crustjs/store": "^0.0.4",
-		"@techatnyu/ralphd": "workspace:*",
+		"@crustjs/style": "^0.0.6",
+		"@crustjs/validate": "^0.0.15",
 		"@opentui/core": "^0.1.77",
 		"@opentui/react": "^0.1.77",
-		"react": "^19.2.4"
+		"@techatnyu/ralphd": "workspace:*",
+		"react": "^19.2.4",
+		"zod": "^4.3.6"
 	}
 }

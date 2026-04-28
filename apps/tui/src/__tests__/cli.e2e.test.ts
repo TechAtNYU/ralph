@@ -6,7 +6,7 @@ import { join } from "node:path";
 async function runCli(
 	args: string[],
 	homeDir: string,
-): Promise<{ stdout: string; stderr: string }> {
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
 	const proc = Bun.spawn(["bun", "run", "src/cli.ts", ...args], {
 		cwd: join(import.meta.dir, "..", ".."),
 		env: {
@@ -22,13 +22,21 @@ async function runCli(
 		new Response(proc.stderr).text(),
 		proc.exited,
 	]);
-	if (exitCode !== 0) {
+
+	return { stdout, stderr, exitCode };
+}
+
+async function runCliOrThrow(
+	args: string[],
+	homeDir: string,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+	const result = await runCli(args, homeDir);
+	if (result.exitCode !== 0) {
 		throw new Error(
-			`cli failed (${args.join(" ")}):\n${stdout}\n${stderr}`.trim(),
+			`cli failed (${args.join(" ")}):\n${result.stdout}\n${result.stderr}`.trim(),
 		);
 	}
-
-	return { stdout, stderr };
+	return result;
 }
 
 describe("cli daemon lifecycle", () => {
@@ -49,10 +57,10 @@ describe("cli daemon lifecycle", () => {
 	test("daemon start is idempotent and health stays on the same pid", async () => {
 		tempHome = await mkdtemp(join(tmpdir(), "ralph-cli-e2e-"));
 
-		await runCli(["daemon", "start"], tempHome);
-		const firstHealth = await runCli(["daemon", "health"], tempHome);
-		const secondStart = await runCli(["daemon", "start"], tempHome);
-		const secondHealth = await runCli(["daemon", "health"], tempHome);
+		await runCliOrThrow(["daemon", "start"], tempHome);
+		const firstHealth = await runCliOrThrow(["daemon", "health"], tempHome);
+		const secondStart = await runCliOrThrow(["daemon", "start"], tempHome);
+		const secondHealth = await runCliOrThrow(["daemon", "health"], tempHome);
 
 		const firstPid = JSON.parse(firstHealth.stdout) as { pid: number };
 		const secondPid = JSON.parse(secondHealth.stdout) as { pid: number };
@@ -61,4 +69,52 @@ describe("cli daemon lifecycle", () => {
 		expect(secondPid.pid).toBe(firstPid.pid);
 		expect(secondStart.stdout).toContain("already running");
 	});
+
+	test("version flag prints the package version", async () => {
+		tempHome = await mkdtemp(join(tmpdir(), "ralph-cli-version-"));
+		const result = await runCliOrThrow(["--version"], tempHome);
+		expect(result.stdout).toContain("ralph v0.0.1");
+	});
+
+	test("help command alias prints root help", async () => {
+		tempHome = await mkdtemp(join(tmpdir(), "ralph-cli-help-"));
+		const result = await runCliOrThrow(["help"], tempHome);
+		expect(result.stdout).toContain("Coding agent orchestration TUI and CLI");
+		expect(result.stdout).toContain("setup");
+	});
+
+	test("daemon start supports json output", async () => {
+		tempHome = await mkdtemp(join(tmpdir(), "ralph-cli-json-"));
+		const result = await runCliOrThrow(["daemon", "start", "--json"], tempHome);
+		const parsed = JSON.parse(result.stdout) as {
+			ok: boolean;
+			health: { pid: number };
+		};
+
+		expect(parsed.ok).toBe(true);
+		expect(parsed.health.pid).toBeGreaterThan(0);
+	});
+
+	test("model get returns json when requested", async () => {
+		tempHome = await mkdtemp(join(tmpdir(), "ralph-cli-model-"));
+		await runCliOrThrow(
+			["model", "set", "anthropic/claude-sonnet-4-5", "--json"],
+			tempHome,
+		);
+
+		const result = await runCliOrThrow(["model", "get", "--json"], tempHome);
+		expect(JSON.parse(result.stdout)).toEqual({
+			model: "anthropic/claude-sonnet-4-5",
+		});
+	});
+
+	test("typoed commands show autocomplete suggestions", async () => {
+		tempHome = await mkdtemp(join(tmpdir(), "ralph-cli-typo-"));
+		const result = await runCli(["deamon"], tempHome);
+		const combined = `${result.stdout}\n${result.stderr}`;
+
+		expect(result.exitCode).toBeGreaterThan(0);
+		expect(combined).toContain('Did you mean "daemon"');
+		expect(combined).not.toContain("TypeError");
+	}, 10_000);
 });
