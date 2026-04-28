@@ -2,6 +2,7 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { App } from "./components/app";
 import { OnboardingError } from "./components/onboarding";
+import { ensureDirectoryInstance } from "./lib/instance";
 import { runOnboardingChecks } from "./lib/onboarding";
 
 const runtime = {
@@ -33,6 +34,7 @@ export async function runTui(): Promise<void> {
 	};
 
 	if (onboarding.ok) {
+		await ensureDirectoryInstance();
 		root.render(<App onQuit={close} />);
 	} else {
 		root.render(<OnboardingError checks={onboarding.checks} onQuit={close} />);
