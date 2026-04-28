@@ -150,6 +150,8 @@ export function App({ onQuit }: AppProps) {
 					<ExecuteView
 						focused={contentFocused && activeTab === 1}
 						planData={planFiles.data}
+						planInstance={planInstance}
+						onPlanRefresh={planFiles.refresh}
 						onOpenChat={(instanceId, instanceName) =>
 							setActiveChat({ instanceId, instanceName, sessionId: null })
 						}

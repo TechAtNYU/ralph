@@ -33,7 +33,9 @@ const TASK_BINDINGS: KeyBinding[] = [
 const EXECUTE_BINDINGS: KeyBinding[] = [
 	{ keys: "j/k", desc: "Select instance" },
 	{ keys: "Enter", desc: "Chat with instance" },
-	{ keys: "s", desc: "Start execution from plan" },
+	{ keys: "s", desc: "Start or resume execution loop" },
+	{ keys: "p", desc: "Pause loop monitoring" },
+	{ keys: "c", desc: "Cancel active loop job" },
 	{ keys: "r", desc: "Refresh" },
 ];
 

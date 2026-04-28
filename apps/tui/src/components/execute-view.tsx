@@ -6,8 +6,18 @@ import type {
 	ManagedInstance,
 } from "@techatnyu/ralphd";
 import { daemon } from "@techatnyu/ralphd";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlanFilesData } from "../hooks/use-plan-files";
+import type { usePlanInstance } from "../hooks/use-plan-instance";
+import {
+	advanceExecutionLoop,
+	getActiveAttempt,
+	type LoopState,
+	loadLoopState,
+	markActiveAttemptCancelled,
+	markLoopPaused,
+} from "../lib/execution-loop";
+import { buildProjectStorePaths } from "../lib/project-store";
 
 interface DashboardData {
 	health: HealthResult;
@@ -18,6 +28,8 @@ interface DashboardData {
 interface ExecuteViewProps {
 	focused: boolean;
 	planData: PlanFilesData;
+	planInstance: ReturnType<typeof usePlanInstance>;
+	onPlanRefresh: () => Promise<void>;
 	onOpenChat: (instanceId: string, instanceName: string) => void;
 }
 
@@ -55,9 +67,23 @@ function jobStateColor(state: string): string {
 	return "#888888";
 }
 
+function loopStatusColor(status?: string): string {
+	if (status === "running") return "cyan";
+	if (status === "completed") return "green";
+	if (status === "needs_attention") return "yellow";
+	if (status === "paused") return "#aaaaaa";
+	return "#888888";
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function ExecuteView({
 	focused,
 	planData,
+	planInstance,
+	onPlanRefresh,
 	onOpenChat,
 }: ExecuteViewProps) {
 	const [loading, setLoading] = useState(true);
@@ -66,22 +92,31 @@ export function ExecuteView({
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const [starting, setStarting] = useState(false);
 	const [startMessage, setStartMessage] = useState<string>();
+	const [loopState, setLoopState] = useState<LoopState>();
+	const loopRunningRef = useRef(false);
+	const { ensure } = planInstance;
 
 	const refresh = useCallback(
 		async (nextIndex = selectedIndex) => {
 			setLoading(true);
 			setError(undefined);
 			try {
+				const handle = await ensure();
 				const [health, instanceList] = await Promise.all([
 					daemon.health(),
 					daemon.listInstances(),
 				]);
 				const safeIndex = clampIndex(nextIndex, instanceList.instances.length);
 				const selected = instanceList.instances[safeIndex];
-				const jobs = await daemon.listJobs(
+				const jobsPromise = daemon.listJobs(
 					selected ? { instanceId: selected.id } : {},
 				);
+				const [jobs, state] = await Promise.all([
+					jobsPromise,
+					loadLoopState(buildProjectStorePaths(handle.projectRoot)),
+				]);
 				setSelectedIndex(safeIndex);
+				setLoopState(state);
 				setData({
 					health,
 					instances: instanceList.instances,
@@ -97,7 +132,7 @@ export function ExecuteView({
 				setLoading(false);
 			}
 		},
-		[selectedIndex],
+		[selectedIndex, ensure],
 	);
 
 	useEffect(() => {
@@ -105,49 +140,39 @@ export function ExecuteView({
 	}, [refresh]);
 
 	const handleStart = useCallback(async () => {
+		if (loopRunningRef.current) {
+			setStartMessage("Loop already running");
+			return;
+		}
 		if (starting || !planData.hasPrd || planData.tasks.length === 0) return;
 		setStarting(true);
+		loopRunningRef.current = true;
 		setStartMessage(undefined);
 		setError(undefined);
 		try {
-			const pendingTasks = planData.tasks.filter((t) => !t.passed);
-			if (pendingTasks.length === 0) {
-				throw new Error("All tasks are already completed");
-			}
-			const task = pendingTasks[0] as (typeof pendingTasks)[number];
-			const lines = [
-				task.description,
-				"",
-				"Subtasks:",
-				...task.subtasks.map((s) => `- ${s}`),
-			];
-			if (task.notes) {
-				lines.push("", `Notes: ${task.notes}`);
-			}
-			const prompt = lines.join("\n");
+			const handle = await ensure();
+			const paths = buildProjectStorePaths(handle.projectRoot);
 
-			const cwd = process.cwd();
-			const { instances } = await daemon.listInstances();
-			let instance = instances.find((i) => i.directory === cwd);
-			if (!instance) {
-				const created = await daemon.createInstance({
-					name: "execute",
-					directory: cwd,
+			while (loopRunningRef.current) {
+				const result = await advanceExecutionLoop({
+					paths,
+					daemonClient: daemon,
 				});
-				instance = created.instance;
+				setLoopState(result.state);
+				setStartMessage(result.message);
+				await onPlanRefresh();
+				await refresh();
+
+				if (result.action === "completed" || result.action === "paused") {
+					break;
+				}
+
+				if (result.action === "verified") {
+					continue;
+				}
+
+				await sleep(result.action === "monitoring" ? 2000 : 1000);
 			}
-
-			await daemon.submitJob({
-				instanceId: instance.id,
-				session: { type: "new" },
-				task: {
-					type: "prompt",
-					prompt,
-				},
-			});
-
-			setStartMessage("Job submitted");
-			await refresh();
 		} catch (startError) {
 			setError(
 				startError instanceof Error
@@ -155,20 +180,87 @@ export function ExecuteView({
 					: "Failed to start execution",
 			);
 		} finally {
+			loopRunningRef.current = false;
 			setStarting(false);
 		}
-	}, [refresh, starting, planData.hasPrd, planData.tasks]);
+	}, [
+		ensure,
+		onPlanRefresh,
+		refresh,
+		starting,
+		planData.hasPrd,
+		planData.tasks.length,
+	]);
+
+	const handleCancel = useCallback(async () => {
+		setError(undefined);
+		try {
+			loopRunningRef.current = false;
+			const handle = await ensure();
+			const paths = buildProjectStorePaths(handle.projectRoot);
+			const state = await loadLoopState(paths);
+			const active = getActiveAttempt(state);
+			if (active?.jobId) {
+				await daemon.cancelJob(active.jobId);
+			}
+			const next = await markActiveAttemptCancelled(paths);
+			setLoopState(next);
+			setStartMessage("Loop cancelled");
+			await onPlanRefresh();
+			await refresh();
+		} catch (cancelError) {
+			setError(
+				cancelError instanceof Error
+					? cancelError.message
+					: "Failed to cancel execution",
+			);
+		} finally {
+			setStarting(false);
+		}
+	}, [ensure, onPlanRefresh, refresh]);
+
+	const handlePause = useCallback(async () => {
+		setError(undefined);
+		try {
+			loopRunningRef.current = false;
+			const handle = await ensure();
+			const paths = buildProjectStorePaths(handle.projectRoot);
+			const next = await markLoopPaused(paths);
+			setLoopState(next);
+			setStartMessage("Loop paused");
+			await onPlanRefresh();
+			await refresh();
+		} catch (pauseError) {
+			setError(
+				pauseError instanceof Error
+					? pauseError.message
+					: "Failed to pause execution",
+			);
+		} finally {
+			setStarting(false);
+		}
+	}, [ensure, onPlanRefresh, refresh]);
 
 	useKeyboard((key) => {
 		if (!focused) return;
 
 		if (key.name === "r") {
-			void refresh();
+			void Promise.all([refresh(), onPlanRefresh()]);
 			return;
 		}
 
-		if (key.name === "s" && planData.hasPrd && !starting) {
+		if (key.name === "s" && planData.hasPrd) {
 			void handleStart();
+			return;
+		}
+
+		if (key.name === "c") {
+			void handleCancel();
+			return;
+		}
+
+		if (key.name === "p") {
+			void handlePause();
 			return;
 		}
 
@@ -197,6 +289,12 @@ export function ExecuteView({
 
 	const selected = data?.instances[selectedIndex];
 	const planReady = planData.hasPrd && planData.tasks.length > 0;
+	const activeAttempt = loopState ? getActiveAttempt(loopState) : undefined;
+	const completedTasks = planData.tasks.filter((task) => task.passed).length;
+	const currentTaskLabel =
+		loopState?.currentTaskIndex !== undefined
+			? `${loopState.currentTaskIndex + 1}/${planData.tasks.length}`
+			: `${completedTasks}/${planData.tasks.length}`;
 
 	return (
 		<box flexDirection="column" flexGrow={1}>
@@ -215,14 +313,38 @@ export function ExecuteView({
 				</text>
 			</box>
 
+			<box flexDirection="column" marginBottom={1}>
+				<box flexDirection="row" height={1}>
+					<text fg={loopStatusColor(loopState?.status)}>
+						{`Loop ${loopState?.status ?? "idle"}`}
+					</text>
+					{planReady && (
+						<text attributes={TextAttributes.DIM}>
+							{`  task ${currentTaskLabel}`}
+						</text>
+					)}
+					{activeAttempt?.jobId && (
+						<text attributes={TextAttributes.DIM}>
+							{`  job ${activeAttempt.jobId.slice(0, 8)}`}
+						</text>
+					)}
+					<box flexGrow={1} />
+					{startMessage && !error && <text fg="green">{startMessage}</text>}
+					{error && <text fg="red">{error}</text>}
+				</box>
+				{loopState?.lastVerificationFailure && !error && (
+					<text fg="yellow">{loopState.lastVerificationFailure}</text>
+				)}
+			</box>
+
 			<box flexDirection="row" height={1} marginBottom={1}>
 				{starting ? (
-					<text fg="cyan">Starting execution...</text>
+					<text fg="cyan">Execution loop running...</text>
 				) : planReady ? (
 					<>
 						<text fg="green">Plan ready</text>
 						<text attributes={TextAttributes.DIM}>
-							{"  Press [s] to start execution"}
+							{"  Press [s] start/resume, [p] pause, [c] cancel"}
 						</text>
 					</>
 				) : (
@@ -230,9 +352,6 @@ export function ExecuteView({
 						Complete spec and prd in Plan view to enable execution
 					</text>
 				)}
-				<box flexGrow={1} />
-				{startMessage && !error && <text fg="green">{startMessage}</text>}
-				{error && <text fg="red">{error}</text>}
 			</box>
 
 			<box flexDirection="row" flexGrow={1} gap={3}>

@@ -19,7 +19,7 @@ interface UsePlanFilesReturn {
 	data: PlanFilesData;
 	loading: boolean;
 	error: string | undefined;
-	refresh: () => void;
+	refresh: () => Promise<void>;
 }
 
 function readFileAsync(path: string): Promise<string | null> {
