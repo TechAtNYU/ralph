@@ -290,6 +290,11 @@ export function ExecuteView({
 	const selected = data?.instances[selectedIndex];
 	const planReady = planData.hasPrd && planData.tasks.length > 0;
 	const activeAttempt = loopState ? getActiveAttempt(loopState) : undefined;
+	const latestWarning = loopState?.attempts
+		.slice()
+		.reverse()
+		.find((attempt) => attempt.verificationWarnings?.length)
+		?.verificationWarnings?.join(", ");
 	const completedTasks = planData.tasks.filter((task) => task.passed).length;
 	const currentTaskLabel =
 		loopState?.currentTaskIndex !== undefined
@@ -334,6 +339,9 @@ export function ExecuteView({
 				</box>
 				{loopState?.lastVerificationFailure && !error && (
 					<text fg="yellow">{loopState.lastVerificationFailure}</text>
+				)}
+				{!loopState?.lastVerificationFailure && latestWarning && !error && (
+					<text fg="yellow">{latestWarning}</text>
 				)}
 			</box>
 

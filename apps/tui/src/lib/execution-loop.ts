@@ -48,6 +48,7 @@ const TaskAttemptSchema = z.object({
 	updatedAt: z.string(),
 	verifiedAt: z.string().optional(),
 	verificationErrors: z.array(z.string()).optional(),
+	verificationWarnings: z.array(z.string()).optional(),
 	before: VerificationSnapshotSchema.optional(),
 });
 
@@ -104,6 +105,7 @@ export interface VerifyTaskCompletionOptions {
 export interface VerificationResult {
 	ok: boolean;
 	errors: string[];
+	warnings: string[];
 }
 
 function isoNow(now: () => Date): string {
@@ -187,7 +189,9 @@ export function getActiveAttempt(state: LoopState): TaskAttempt | undefined {
 	return [...state.attempts]
 		.reverse()
 		.find((attempt) =>
-			["queued", "running", "succeeded", "failed"].includes(attempt.status),
+			["queued", "running", "succeeded", "failed", "needs_attention"].includes(
+				attempt.status,
+			),
 		);
 }
 
@@ -330,13 +334,11 @@ export async function verifyTaskCompletion({
 	readGitHead: readHead = readGitHead,
 }: VerifyTaskCompletionOptions): Promise<VerificationResult> {
 	const errors: string[] = [];
+	const warnings: string[] = [];
+	const missingSentinel = !job.outputText?.includes(TASK_COMPLETE_SENTINEL);
 
 	if (job.state !== "succeeded") {
 		errors.push(`job ended as ${job.state}`);
-	}
-
-	if (!job.outputText?.includes(TASK_COMPLETE_SENTINEL)) {
-		errors.push(`job output is missing ${TASK_COMPLETE_SENTINEL}`);
 	}
 
 	let tasks: PrdTask[] = [];
@@ -369,9 +371,18 @@ export async function verifyTaskCompletion({
 		}
 	}
 
+	if (missingSentinel) {
+		if (errors.length === 0) {
+			warnings.push("verified without sentinel");
+		} else {
+			errors.push(`job output is missing ${TASK_COMPLETE_SENTINEL}`);
+		}
+	}
+
 	return {
 		ok: errors.length === 0,
 		errors,
+		warnings,
 	};
 }
 
@@ -508,6 +519,7 @@ export async function advanceExecutionLoop({
 			state = updateAttempt(state, active.id, {
 				status: "needs_attention",
 				verificationErrors: verification.errors,
+				verificationWarnings: verification.warnings,
 				updatedAt: timestamp,
 			});
 			state = {
@@ -529,6 +541,7 @@ export async function advanceExecutionLoop({
 		state = updateAttempt(state, active.id, {
 			status: "verified",
 			verificationErrors: [],
+			verificationWarnings: verification.warnings,
 			verifiedAt: timestamp,
 			updatedAt: timestamp,
 		});
@@ -539,10 +552,13 @@ export async function advanceExecutionLoop({
 			updatedAt: timestamp,
 		};
 		await saveLoopState(paths, state);
+		const warningSuffix = verification.warnings.length
+			? ` (${verification.warnings.join(", ")})`
+			: "";
 		return {
 			state,
 			action: "verified",
-			message: `Verified task ${active.taskIndex + 1}`,
+			message: `Verified task ${active.taskIndex + 1}${warningSuffix}`,
 			job,
 			attempt: state.attempts.find((attempt) => attempt.id === active.id),
 		};
@@ -658,4 +674,39 @@ export async function markLoopPaused(
 	};
 	await saveLoopState(paths, paused);
 	return paused;
+}
+
+export async function acceptActiveAttempt(
+	paths: ProjectStorePaths,
+	options: {
+		warning?: string;
+		now?: () => Date;
+	} = {},
+): Promise<LoopState> {
+	const now = options.now ?? (() => new Date());
+	const timestamp = isoNow(now);
+	const state = await loadLoopState(paths, now);
+	const active = getActiveAttempt(state);
+	if (!active) {
+		throw new Error("No active attempt to accept");
+	}
+	const warnings = [
+		...(active.verificationWarnings ?? []),
+		options.warning ?? "manually accepted",
+	].filter((warning, index, all) => all.indexOf(warning) === index);
+	const next = updateAttempt(state, active.id, {
+		status: "verified",
+		verificationErrors: [],
+		verificationWarnings: warnings,
+		verifiedAt: timestamp,
+		updatedAt: timestamp,
+	});
+	const accepted = {
+		...next,
+		status: "running" as const,
+		lastVerificationFailure: undefined,
+		updatedAt: timestamp,
+	};
+	await saveLoopState(paths, accepted);
+	return accepted;
 }

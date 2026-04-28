@@ -9,6 +9,7 @@ import type {
 	ManagedInstance,
 } from "@techatnyu/ralphd";
 import {
+	acceptActiveAttempt,
 	advanceExecutionLoop,
 	buildExecutionPrompt,
 	type ExecutionDaemon,
@@ -187,7 +188,7 @@ describe("execution loop", () => {
 			job: makeJob("succeeded", TASK_COMPLETE_SENTINEL),
 			before,
 		});
-		expect(ok).toEqual({ ok: true, errors: [] });
+		expect(ok).toEqual({ ok: true, errors: [], warnings: [] });
 
 		const missingSentinel = await verifyTaskCompletion({
 			paths,
@@ -196,9 +197,11 @@ describe("execution loop", () => {
 			job: makeJob("succeeded", "done"),
 			before,
 		});
-		expect(missingSentinel.errors).toContain(
-			`job output is missing ${TASK_COMPLETE_SENTINEL}`,
-		);
+		expect(missingSentinel).toEqual({
+			ok: true,
+			errors: [],
+			warnings: ["verified without sentinel"],
+		});
 
 		await writePrd(paths, TASKS);
 		const unchangedPrd = await verifyTaskCompletion({
@@ -209,6 +212,20 @@ describe("execution loop", () => {
 			before,
 		});
 		expect(unchangedPrd.errors).toContain("tasks[0].passed is not true");
+
+		const missingSentinelWithFailedDurable = await verifyTaskCompletion({
+			paths,
+			taskIndex: 0,
+			task: TASK_0,
+			job: makeJob("succeeded", "done"),
+			before,
+		});
+		expect(missingSentinelWithFailedDurable.errors).toContain(
+			"tasks[0].passed is not true",
+		);
+		expect(missingSentinelWithFailedDurable.errors).toContain(
+			`job output is missing ${TASK_COMPLETE_SENTINEL}`,
+		);
 
 		const unchangedProgress = await verifyTaskCompletion({
 			paths,
@@ -274,6 +291,71 @@ describe("execution loop", () => {
 		expect(second.action).toBe("submitted");
 		expect(fakeDaemon.submittedPrompts).toHaveLength(2);
 		expect(fakeDaemon.submittedPrompts[1]).toContain("task index 1");
+	});
+
+	it("advances after a sentinel-only miss when durable checks pass", async () => {
+		const paths = await createStore();
+		const fakeDaemon = new FakeDaemon();
+
+		const first = await advanceExecutionLoop({
+			paths,
+			daemonClient: fakeDaemon,
+		});
+		expect(first.action).toBe("submitted");
+
+		await writePrd(paths, [{ ...TASK_0, passed: true }, TASK_1]);
+		await appendProgress(paths, `Task 1: ${TASK_0.description}`);
+		fakeDaemon.completeJob("job-0", "All durable work is done.");
+
+		const verified = await advanceExecutionLoop({
+			paths,
+			daemonClient: fakeDaemon,
+		});
+		expect(verified.action).toBe("verified");
+		expect(verified.attempt?.verificationWarnings).toEqual([
+			"verified without sentinel",
+		]);
+
+		const second = await advanceExecutionLoop({
+			paths,
+			daemonClient: fakeDaemon,
+		});
+		expect(second.action).toBe("submitted");
+		expect(second.attempt?.taskIndex).toBe(1);
+	});
+
+	it("accepts a needs_attention attempt and resumes at the next pending task", async () => {
+		const paths = await createStore();
+		const fakeDaemon = new FakeDaemon();
+
+		await advanceExecutionLoop({
+			paths,
+			daemonClient: fakeDaemon,
+		});
+		fakeDaemon.completeJob("job-0", "no sentinel and no durable updates");
+		const paused = await advanceExecutionLoop({
+			paths,
+			daemonClient: fakeDaemon,
+		});
+		expect(paused.state.status).toBe("needs_attention");
+
+		await writePrd(paths, [{ ...TASK_0, passed: true }, TASK_1]);
+		await appendProgress(paths, `Task 1: ${TASK_0.description}`);
+		const accepted = await acceptActiveAttempt(paths, {
+			warning: "verified without sentinel",
+		});
+		expect(accepted.status).toBe("running");
+		expect(accepted.attempts[0]?.status).toBe("verified");
+		expect(accepted.attempts[0]?.verificationWarnings).toEqual([
+			"verified without sentinel",
+		]);
+
+		const resumed = await advanceExecutionLoop({
+			paths,
+			daemonClient: fakeDaemon,
+		});
+		expect(resumed.action).toBe("submitted");
+		expect(resumed.attempt?.taskIndex).toBe(1);
 	});
 
 	it("pauses without cancelling and cancellation leaves the task pending", async () => {
