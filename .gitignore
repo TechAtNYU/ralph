@@ -41,6 +41,3 @@ yarn-error.log*
 *.pem
 
 .ralph-dev
-
-# Claude
-CLAUDE.md
