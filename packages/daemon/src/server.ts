@@ -137,6 +137,55 @@ function normalizeErrorMessage(error: unknown): string {
 	return "Unknown daemon error";
 }
 
+function normalizeSessionError(error: unknown): string {
+	if (!error) {
+		return "OpenCode session error";
+	}
+
+	if (typeof error === "string") {
+		return error;
+	}
+
+	if (typeof error !== "object") {
+		return String(error);
+	}
+
+	const record = error as {
+		name?: unknown;
+		data?: unknown;
+		message?: unknown;
+	};
+	const name = typeof record.name === "string" ? record.name : "OpenCodeError";
+	const data = record.data;
+
+	if (typeof data === "object" && data !== null) {
+		const dataRecord = data as {
+			message?: unknown;
+			providerID?: unknown;
+			modelID?: unknown;
+		};
+		if (typeof dataRecord.message === "string") {
+			return `${name}: ${dataRecord.message}`;
+		}
+		if (
+			typeof dataRecord.providerID === "string" &&
+			typeof dataRecord.modelID === "string"
+		) {
+			return `${name}: ${dataRecord.providerID}/${dataRecord.modelID}`;
+		}
+	}
+
+	if (typeof record.message === "string") {
+		return `${name}: ${record.message}`;
+	}
+
+	try {
+		return `${name}: ${JSON.stringify(data ?? error)}`;
+	} catch {
+		return name;
+	}
+}
+
 export class Daemon {
 	private readonly registry: OpencodeRuntimeManager;
 	/** Per-instance queue of job ids waiting to be scheduled. */
@@ -159,6 +208,16 @@ export class Daemon {
 	private instanceCursor = 0;
 	private readonly maxConcurrency: number;
 	private readonly cancelWaitTimeoutMs: number;
+	private readonly sessionIdleWaiters = new Map<string, () => void>();
+	private readonly sessionErrors = new Map<string, string>();
+	private readonly pendingPermissions = new Map<
+		string,
+		Array<{
+			permission: string;
+			pattern: string;
+			action: "allow" | "deny" | "ask";
+		}>
+	>();
 
 	constructor(
 		private readonly store: StateStore,
@@ -174,6 +233,22 @@ export class Daemon {
 					event.properties.field,
 					event.properties.delta,
 				);
+			} else if (event.type === "session.idle") {
+				this.resolveSessionIdle(event.properties.sessionID);
+			} else if (
+				event.type === "session.status" &&
+				event.properties.status.type === "idle"
+			) {
+				this.resolveSessionIdle(event.properties.sessionID);
+			} else if (event.type === "session.error") {
+				const sessionId = event.properties.sessionID;
+				if (sessionId) {
+					this.sessionErrors.set(
+						sessionId,
+						normalizeSessionError(event.properties.error),
+					);
+					this.resolveSessionIdle(sessionId);
+				}
 			} else if (event.type === "question.asked") {
 				this.routeQuestionToJob(instanceId, {
 					requestId: event.properties.id,
@@ -245,6 +320,8 @@ export class Daemon {
 					return this.success(raw, await this.handleJobCancel(raw));
 				case "job.stream":
 					return this.success(raw, this.handleJobStream(raw));
+				case "job.submit_and_stream":
+					return this.success(raw, await this.handleJobSubmitAndStream(raw));
 				case "question.reply":
 					return this.success(raw, await this.handleQuestionReply(raw));
 			}
@@ -391,6 +468,38 @@ export class Daemon {
 			session: request.params.session,
 			task: request.params.task,
 		});
+		if (
+			request.params.session.type === "new" &&
+			request.params.session.permission
+		) {
+			this.pendingPermissions.set(job.id, request.params.session.permission);
+		}
+		this.enqueueById(instanceId, job.id);
+		this.scheduleDrain();
+		return { job };
+	}
+
+	private async handleJobSubmitAndStream(
+		request: RequestByMethod<"job.submit_and_stream">,
+	): Promise<SubmitResult> {
+		if (this.shuttingDown) {
+			throw new StoreError("shutdown", "daemon is shutting down");
+		}
+
+		const { instanceId } = request.params;
+		this.store.assertInstance(instanceId);
+
+		const job = this.store.createJob({
+			instanceId,
+			session: request.params.session,
+			task: request.params.task,
+		});
+		if (
+			request.params.session.type === "new" &&
+			request.params.session.permission
+		) {
+			this.pendingPermissions.set(job.id, request.params.session.permission);
+		}
 		this.enqueueById(instanceId, job.id);
 		this.scheduleDrain();
 		return { job };
@@ -555,6 +664,14 @@ export class Daemon {
 		}
 	}
 
+	private resolveSessionIdle(sessionId: string): void {
+		const resolve = this.sessionIdleWaiters.get(sessionId);
+		if (resolve) {
+			this.sessionIdleWaiters.delete(sessionId);
+			resolve();
+		}
+	}
+
 	/**
 	 * Route an incoming delta from the OpenCode event stream to the matching
 	 * running job. Synchronously appends the delta to the job's `output_text`
@@ -629,7 +746,7 @@ export class Daemon {
 		}
 	}
 
-	private scheduleDrain(): void {
+	scheduleDrain(): void {
 		if (this.drainPromise) {
 			this.drainPending = true;
 			return;
@@ -711,57 +828,119 @@ export class Daemon {
 		>;
 		const patch: { error?: string; outputText?: string; messageId?: string } =
 			{};
+		const log = (msg: string) =>
+			process.stdout.write(`\n[job:${job.id.slice(0, 8)}] ${msg}\n`);
 
 		try {
+			log("starting instance");
 			const instance = await this.startInstance(job.instanceId);
+			log("ensuring runtime");
 			const runtime = await this.registry.ensureStarted(
 				instance.id,
 				instance.directory,
 			);
+			log("resolving session");
 			const sessionId = await this.resolveSession(
 				runtime.client,
 				instance,
 				job,
 			);
 			this.runningSessionIds.set(job.id, sessionId);
+			log(`session=${sessionId}`);
 
-			const response = await runtime.client.session.prompt({
-				sessionID: sessionId,
-				directory: instance.directory,
-				agent: job.task.agent,
-				model: job.task.model
-					? {
-							providerID: job.task.model.providerId,
-							modelID: job.task.model.modelId,
+			switch (job.task.type) {
+				case "prompt": {
+					const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+					const NO_INFO_TIMEOUT_MS = 30 * 1000;
+					const idlePromise = new Promise<void>((resolve) => {
+						this.sessionIdleWaiters.set(sessionId, resolve);
+					});
+					log(`sending prompt: "${job.task.prompt.slice(0, 50)}"`);
+					const response = await runtime.client.session.prompt({
+						sessionID: sessionId,
+						directory: instance.directory,
+						agent: job.task.agent,
+						model: job.task.model
+							? {
+									providerID: job.task.model.providerId,
+									modelID: job.task.model.modelId,
+								}
+							: undefined,
+						system: job.task.system,
+						variant: job.task.variant,
+						parts: [{ type: "text", text: job.task.prompt }],
+					});
+					patch.messageId = response.info?.id;
+					const finalText = extractText(response.parts ?? []);
+					const current = this.store.getJob(job.id);
+					if (!current?.outputText || current.outputText.length === 0) {
+						patch.outputText = finalText;
+					}
+					const hasOutput =
+						(patch.outputText && patch.outputText.length > 0) ||
+						(current?.outputText && current.outputText.length > 0);
+					if (!hasOutput) {
+						log("prompt sent, awaiting idle");
+						try {
+							await Promise.race([
+								idlePromise,
+								response.info
+									? new Promise<void>((_, reject) => {
+											setTimeout(
+												() => reject(new Error("session.idle timeout")),
+												IDLE_TIMEOUT_MS,
+											);
+										})
+									: new Promise<void>((_, reject) => {
+											setTimeout(
+												() =>
+													reject(
+														new Error("OpenCode returned no message data"),
+													),
+												NO_INFO_TIMEOUT_MS,
+											);
+										}),
+							]);
+							log("idle received");
+						} catch {
+							log("idle timeout — completing anyway");
+							this.sessionIdleWaiters.delete(sessionId);
 						}
-					: undefined,
-				system: job.task.system,
-				variant: job.task.variant,
-				parts: [{ type: "text", text: job.task.prompt }],
-			});
-			patch.messageId = response.info.id;
-			// Prefer accumulated text from streamed deltas; fall back to the
-			// final parts payload if no deltas were received (non-streaming
-			// providers). Any deltas already landed in output_text via
-			// appendJobOutput, so only write the fallback when nothing was
-			// accumulated.
-			const current = this.store.getJob(job.id);
-			if (!current?.outputText || current.outputText.length === 0) {
-				patch.outputText = extractText(response.parts);
-			}
-			if (controller.signal.aborted) {
-				// prompt() returned successfully but the job was cancelled before
-				// the abort was observed — record the cancellation reason.
-				terminalState = "cancelled";
-				patch.error = "Job cancelled";
-			} else {
-				terminalState = "succeeded";
+					}
+					const sessionError = this.sessionErrors.get(sessionId);
+					if (sessionError) {
+						terminalState = controller.signal.aborted ? "cancelled" : "failed";
+						patch.error = controller.signal.aborted
+							? "Job cancelled"
+							: sessionError;
+					} else if (!hasOutput) {
+						terminalState = controller.signal.aborted ? "cancelled" : "failed";
+						patch.error = controller.signal.aborted
+							? "Job cancelled"
+							: "OpenCode returned no response. Check provider credentials and model availability.";
+					} else if (controller.signal.aborted) {
+						terminalState = "cancelled";
+						patch.error = "Job cancelled";
+					} else {
+						terminalState = "succeeded";
+					}
+					log(
+						`job ${terminalState}, outputText length: ${patch.outputText?.length ?? current?.outputText?.length ?? 0}`,
+					);
+					break;
+				}
 			}
 		} catch (error) {
 			terminalState = controller.signal.aborted ? "cancelled" : "failed";
 			patch.error = controller.signal.aborted
 				? "Job cancelled"
 				: normalizeErrorMessage(error);
+			log(`job error: ${patch.error}`);
+		} finally {
+			if (job.sessionId) {
+				this.sessionIdleWaiters.delete(job.sessionId);
+				this.sessionErrors.delete(job.sessionId);
+			}
 		}
 
 		const finalJob = this.store.markJobTerminal(job.id, terminalState, patch);
@@ -778,9 +957,14 @@ export class Daemon {
 		if (sessionRef.remoteSessionId) return sessionRef.remoteSessionId;
 
 		const title = deriveSessionTitle(sessionRef, job);
+		const permission = this.pendingPermissions.get(job.id) ?? [
+			{ permission: "*", pattern: "*", action: "allow" },
+		];
+		this.pendingPermissions.delete(job.id);
 		const session = await client.session.create({
 			directory: instance.directory,
 			title,
+			permission,
 		});
 		this.store.assignRemoteSessionToJob(job.id, session.id, title);
 		return session.id;
@@ -984,6 +1168,26 @@ export function createConnectionHandler(daemon: Daemon) {
 						issues: normalizeIssues(request.error),
 					},
 				} satisfies ErrorResponse);
+				return;
+			}
+
+			if (request.data.method === "job.submit_and_stream") {
+				void daemon.handleRequest(request.data).then((ack) => {
+					if (!writeLine(ack)) return;
+					if (!ack.ok) return;
+
+					const jobId = (ack.result as SubmitResult).job.id;
+					const unsub = daemon.subscribeJob(jobId, (event) => {
+						if (socket.writable) {
+							socket.write(`${JSON.stringify(event)}\n`);
+						}
+						if (event.type === "done" || event.type === "error") {
+							socket.end();
+						}
+					});
+					socket.on("close", unsub);
+					daemon.scheduleDrain();
+				});
 				return;
 			}
 

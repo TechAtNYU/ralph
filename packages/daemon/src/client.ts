@@ -240,6 +240,75 @@ export class DaemonClient {
 	}
 
 	/**
+	 * Submit a job and stream events on the same socket. Eliminates the
+	 * race between separate submit + stream calls where deltas could be
+	 * lost between the two connections.
+	 */
+	async submitAndStreamJob(
+		params: ParamsByMethod<"job.submit_and_stream">,
+	): Promise<{
+		job: ResultByMethod<"job.submit_and_stream">["job"];
+		events: AsyncGenerator<JobStreamEvent>;
+	}> {
+		const request = RequestMessageSchema.parse({
+			id: Bun.randomUUIDv7(),
+			method: "job.submit_and_stream",
+			params,
+		});
+
+		const socket = connect(this.socketPath);
+		socket.setEncoding("utf8");
+		socket.on("error", () => {});
+		const rl = createInterface({ input: socket });
+		const lines = rl[Symbol.asyncIterator]();
+
+		socket.write(`${JSON.stringify(request)}\n`);
+
+		const firstLine = await lines.next();
+		if (firstLine.done || !firstLine.value.trim()) {
+			rl.close();
+			socket.destroy();
+			throw new Error("daemon closed connection before ack");
+		}
+
+		const ack = ResponseMessageSchema.safeParse(JSON.parse(firstLine.value));
+		if (!ack.success || !ack.data.ok) {
+			rl.close();
+			socket.destroy();
+			throw new Error(
+				!ack.success
+					? "invalid daemon response"
+					: (ack.data as { error: { message: string } }).error.message,
+			);
+		}
+
+		const job = (
+			ack.data.result as { job: ResultByMethod<"job.submit_and_stream">["job"] }
+		).job;
+
+		async function* eventStream(): AsyncGenerator<JobStreamEvent> {
+			try {
+				for await (const line of rl) {
+					if (!line.trim()) continue;
+					const event = JobStreamEventSchema.safeParse(
+						JSON.parse(line) as unknown,
+					);
+					if (!event.success) continue;
+					yield event.data;
+					if (event.data.type === "done" || event.data.type === "error") {
+						return;
+					}
+				}
+			} finally {
+				rl.close();
+				socket.destroy();
+			}
+		}
+
+		return { job, events: eventStream() };
+	}
+
+	/**
 	 * Open a stream over the daemon socket and yield job events as they
 	 * arrive. The first line on the wire is the ack response (a normal
 	 * ResponseMessage); every subsequent line is a bare JobStreamEvent.

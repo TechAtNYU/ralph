@@ -1,3 +1,4 @@
+import { createServer } from "node:net";
 import {
 	type AssistantMessage,
 	createOpencode,
@@ -8,7 +9,15 @@ import {
 } from "@opencode-ai/sdk/v2";
 
 export interface OpencodeSessionClient {
-	create(parameters: { directory?: string; title?: string }): Promise<Session>;
+	create(parameters: {
+		directory?: string;
+		title?: string;
+		permission?: Array<{
+			permission: string;
+			pattern: string;
+			action: "allow" | "deny" | "ask";
+		}>;
+	}): Promise<Session>;
 	prompt(parameters: {
 		sessionID: string;
 		directory?: string;
@@ -20,7 +29,7 @@ export interface OpencodeSessionClient {
 		system?: string;
 		variant?: string;
 		parts?: Array<TextPartInput>;
-	}): Promise<{ info: AssistantMessage; parts: Part[] }>;
+	}): Promise<{ info?: AssistantMessage; parts?: Part[] }>;
 	abort(parameters: {
 		sessionID: string;
 		directory?: string;
@@ -46,6 +55,14 @@ export interface ProviderListResult {
 	providers: Provider[];
 	connected: string[];
 }
+
+type RawProviderModel = ProviderModel & {
+	capabilities?: {
+		attachment?: boolean;
+		reasoning?: boolean;
+		toolcall?: boolean;
+	};
+};
 
 export interface OpencodeRuntimeClient {
 	session: OpencodeSessionClient;
@@ -108,6 +125,22 @@ interface InstanceSubscription {
 	cancel(): void;
 }
 
+function findFreePort(): Promise<number> {
+	return new Promise((resolve, reject) => {
+		const srv = createServer();
+		srv.listen(0, "127.0.0.1", () => {
+			const addr = srv.address();
+			if (typeof addr === "object" && addr) {
+				const port = addr.port;
+				srv.close(() => resolve(port));
+			} else {
+				srv.close(() => reject(new Error("Failed to get port")));
+			}
+		});
+		srv.on("error", reject);
+	});
+}
+
 export class OpencodeRegistry implements OpencodeRuntimeManager {
 	private shared?: SharedRuntime;
 	private sharedStarting?: Promise<SharedRuntime>;
@@ -167,8 +200,8 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 								responseStyle: "data",
 							});
 							return res as unknown as {
-								info: AssistantMessage;
-								parts: Part[];
+								info?: AssistantMessage;
+								parts?: Part[];
 							};
 						},
 						abort: (parameters) =>
@@ -192,17 +225,21 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 									id: p.id,
 									name: p.name,
 									models: Object.fromEntries(
-										Object.entries(p.models).map(([k, m]) => [
-											k,
-											{
-												id: m.id,
-												name: m.name,
-												family: m.family,
-												attachment: m.attachment,
-												reasoning: m.reasoning,
-												tool_call: m.tool_call,
-											},
-										]),
+										Object.entries(p.models).map(([k, rawModel]) => {
+											const m = rawModel as RawProviderModel;
+											return [
+												k,
+												{
+													id: m.id,
+													name: m.name,
+													family: m.family,
+													attachment:
+														m.attachment ?? m.capabilities?.attachment,
+													reasoning: m.reasoning ?? m.capabilities?.reasoning,
+													tool_call: m.tool_call ?? m.capabilities?.toolcall,
+												},
+											];
+										}),
 									),
 								})),
 								connected: response.data.connected,

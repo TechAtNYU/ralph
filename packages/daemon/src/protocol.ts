@@ -46,11 +46,19 @@ const JobTask = z.discriminatedUnion("type", [
 ]);
 export type JobTask = z.infer<typeof JobTask>;
 
+const PermissionRule = z.strictObject({
+	permission: z.string().min(1),
+	pattern: z.string().min(1),
+	action: z.enum(["allow", "deny", "ask"]),
+});
+export type PermissionRule = z.infer<typeof PermissionRule>;
+
 /** Whether the job starts a new conversation or continues an existing one. */
 const JobSession = z.discriminatedUnion("type", [
 	z.strictObject({
 		type: z.literal("new"),
 		title: z.string().min(1).optional(),
+		permission: z.array(PermissionRule).optional(),
 	}),
 	z.strictObject({
 		type: z.literal("existing"),
@@ -417,6 +425,7 @@ const RequestMethod = z.enum([
 	"job.get",
 	"job.cancel",
 	"job.stream",
+	"job.submit_and_stream",
 	"question.reply",
 ]);
 export type RequestMethod = z.infer<typeof RequestMethod>;
@@ -527,6 +536,12 @@ const JobStreamRequest = z.strictObject({
 	params: JobStreamParams,
 });
 
+const JobSubmitAndStreamRequest = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("job.submit_and_stream"),
+	params: JobSubmitParams,
+});
+
 const QuestionReplyRequest = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("question.reply"),
@@ -551,6 +566,7 @@ export const RequestMessage = z.discriminatedUnion("method", [
 	JobGetRequest,
 	JobCancelRequest,
 	JobStreamRequest,
+	JobSubmitAndStreamRequest,
 	QuestionReplyRequest,
 ]);
 export type RequestMessage = z.infer<typeof RequestMessage>;
@@ -681,6 +697,13 @@ const JobStreamSuccess = z.strictObject({
 	result: StreamAckResult,
 });
 
+const JobSubmitAndStreamSuccess = z.strictObject({
+	id: z.string().min(1),
+	method: z.literal("job.submit_and_stream"),
+	ok: z.literal(true),
+	result: SubmitResult,
+});
+
 const QuestionReplySuccess = z.strictObject({
 	id: z.string().min(1),
 	method: z.literal("question.reply"),
@@ -716,6 +739,7 @@ export const ResponseMessage = z.union([
 	JobGetSuccess,
 	JobCancelSuccess,
 	JobStreamSuccess,
+	JobSubmitAndStreamSuccess,
 	QuestionReplySuccess,
 	ErrorResponse,
 ]);
