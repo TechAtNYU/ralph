@@ -1,4 +1,4 @@
-# @techatnyu/ralph
+# @techatnyu/ralphd
 
 ## 0.1.0
 
@@ -8,9 +8,6 @@
 
 ### Patch Changes
 
-- 1f71d19: Add onboarding checks for OpenCode installation and authentication.
-- 966ee6c: Add worktree wrapper helpers and tests for the TUI.
-- c66c954: Add the daemon-backed TUI, docs site, and release tooling.
 - 6181ce2: Migrate daemon persisted state from `~/.ralph/state.json` to a SQLite
   database at `~/.ralph/state.sqlite`.
 
@@ -23,13 +20,3 @@
   will need to re-register any instances and resubmit in-flight jobs. Old
   terminal job history is lost. If preserving state matters to you, hold off
   upgrading until an explicit migration path ships.
-
-- Updated dependencies [a7b9b2b]
-- Updated dependencies [6181ce2]
-  - @techatnyu/ralphd@0.1.0
-
-## 0.0.1
-
-### Patch Changes
-
-- 79e7e09: first release
