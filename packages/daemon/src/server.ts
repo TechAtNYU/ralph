@@ -33,6 +33,7 @@ import {
 	type ResponseError,
 	type ResponseMessage,
 	type ResultByMethod,
+	type SessionDiffsResult,
 	type SessionGetResult,
 	type SessionListResult,
 	type ShutdownResult,
@@ -245,6 +246,8 @@ export class Daemon {
 					return this.success(raw, await this.handleJobCancel(raw));
 				case "job.stream":
 					return this.success(raw, this.handleJobStream(raw));
+				case "session.diffs":
+					return this.success(raw, await this.handleSessionDiffs(raw));
 				case "question.reply":
 					return this.success(raw, await this.handleQuestionReply(raw));
 			}
@@ -580,6 +583,21 @@ export class Daemon {
 			this.emitJobEvent(jobId, { type: "delta", jobId, field, delta });
 			return;
 		}
+	}
+
+	private async handleSessionDiffs(
+		request: RequestByMethod<"session.diffs">,
+	): Promise<SessionDiffsResult> {
+		const instance = await this.startInstance(request.params.instanceId);
+		const runtime = await this.registry.ensureStarted(
+			instance.id,
+			instance.directory,
+		);
+		const diffs = await runtime.client.session.diff({
+			sessionID: request.params.sessionId,
+			directory: instance.directory,
+		});
+		return { diffs };
 	}
 
 	private routeQuestionToJob(
