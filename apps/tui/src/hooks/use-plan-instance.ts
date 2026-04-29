@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { daemon } from "@techatnyu/ralphd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -23,7 +24,7 @@ interface UsePlanInstanceReturn {
 	ensure: () => Promise<PlanInstanceHandle>;
 }
 
-export function usePlanInstance(): UsePlanInstanceReturn {
+export function usePlanInstance(directory?: string): UsePlanInstanceReturn {
 	const [instanceId, setInstanceId] = useState<string | null>(null);
 	const [scaffoldPath, setScaffoldPath] = useState<string | null>(null);
 	const [projectRoot, setProjectRoot] = useState<string | null>(null);
@@ -31,6 +32,18 @@ export function usePlanInstance(): UsePlanInstanceReturn {
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string>();
 	const resolving = useRef<Promise<PlanInstanceHandle> | null>(null);
+	const lastDirectory = useRef<string | undefined>(directory);
+
+	// Reset cached state when directory changes so ensure() re-resolves.
+	useEffect(() => {
+		if (lastDirectory.current === directory) return;
+		lastDirectory.current = directory;
+		setInstanceId(null);
+		setScaffoldPath(null);
+		setProjectRoot(null);
+		setProjectSlug(null);
+		resolving.current = null;
+	}, [directory]);
 
 	const ensure = useCallback(async (): Promise<PlanInstanceHandle> => {
 		if (instanceId && scaffoldPath && projectRoot && projectSlug) {
@@ -38,11 +51,12 @@ export function usePlanInstance(): UsePlanInstanceReturn {
 		}
 		if (resolving.current) return resolving.current;
 
-		const resolve = async (): Promise<PlanInstanceHandle> => {
+		const doResolve = async (): Promise<PlanInstanceHandle> => {
 			setLoading(true);
 			setError(undefined);
 			try {
-				const root = await resolveProjectRoot(process.cwd());
+				const cwd = directory ? resolve(directory) : process.cwd();
+				const root = await resolveProjectRoot(cwd);
 				const slug = createProjectSlug(root);
 				const { instances } = await daemon.listInstances();
 				const existing = instances.find((i) => i.directory === root);
@@ -76,9 +90,9 @@ export function usePlanInstance(): UsePlanInstanceReturn {
 			}
 		};
 
-		resolving.current = resolve();
+		resolving.current = doResolve();
 		return resolving.current;
-	}, [instanceId, scaffoldPath, projectRoot, projectSlug]);
+	}, [instanceId, scaffoldPath, projectRoot, projectSlug, directory]);
 
 	useEffect(() => {
 		void ensure().catch(() => {

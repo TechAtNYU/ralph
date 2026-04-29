@@ -15,6 +15,7 @@ const GENERAL_BINDINGS: KeyBinding[] = [
 	{ keys: "1/2/3", desc: "Jump to tab" },
 	{ keys: "q", desc: "Quit (from tabs)" },
 	{ keys: "Esc", desc: "Back to tabs" },
+	{ keys: "Ctrl+P", desc: "Browse projects" },
 	{ keys: "?", desc: "Toggle this help" },
 ];
 

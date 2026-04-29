@@ -20,6 +20,7 @@ interface PlanViewProps {
 	planData: PlanFilesData;
 	daemonOnline: boolean;
 	planInstance: ReturnType<typeof usePlanInstance>;
+	activeSessionId?: string | null;
 }
 
 async function readSpecForPrompt(scaffoldPath: string): Promise<string> {
@@ -89,6 +90,7 @@ export function PlanView({
 	planData,
 	daemonOnline,
 	planInstance,
+	activeSessionId,
 }: PlanViewProps) {
 	const [showTasks, setShowTasks] = useState(false);
 	const [showSpec, setShowSpec] = useState(false);
@@ -98,7 +100,7 @@ export function PlanView({
 		() => ensureInstance().then((h) => h.instanceId),
 		[ensureInstance],
 	);
-	const chat = useChat(ensureInstanceId);
+	const chat = useChat(ensureInstanceId, activeSessionId);
 	const { width } = useTerminalDimensions();
 	const showSidebar = width >= SIDEBAR_MIN_WIDTH;
 

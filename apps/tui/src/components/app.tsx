@@ -8,6 +8,7 @@ import { Chat } from "./chat";
 import { ExecuteView } from "./execute-view";
 import { HelpOverlay } from "./help-overlay";
 import { PlanView } from "./plan-view";
+import { ProjectBrowser } from "./project-browser";
 import { ReviewView } from "./review-view";
 import { StatusBar } from "./status-bar";
 
@@ -34,8 +35,13 @@ export function App({ onQuit }: AppProps) {
 	const [focusZone, setFocusZone] = useState<FocusZone>("content");
 	const [daemonOnline, setDaemonOnline] = useState(true);
 	const [showHelp, setShowHelp] = useState(false);
+	const [showProjectBrowser, setShowProjectBrowser] = useState(false);
 	const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
-	const planInstance = usePlanInstance();
+	const [projectDirectory, setProjectDirectory] = useState<
+		string | undefined
+	>();
+	const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+	const planInstance = usePlanInstance(projectDirectory);
 	const planFiles = usePlanFiles(planInstance.scaffoldPath);
 
 	const checkDaemon = useCallback(async () => {
@@ -55,6 +61,7 @@ export function App({ onQuit }: AppProps) {
 
 	useKeyboard((key) => {
 		if (activeChat) return;
+		if (showProjectBrowser) return;
 		if (showHelp) {
 			if (
 				key.name === "escape" ||
@@ -63,6 +70,11 @@ export function App({ onQuit }: AppProps) {
 			) {
 				setShowHelp(false);
 			}
+			return;
+		}
+
+		if (key.name === "p" && key.ctrl) {
+			setShowProjectBrowser(true);
 			return;
 		}
 
@@ -95,7 +107,8 @@ export function App({ onQuit }: AppProps) {
 		}
 	});
 
-	const contentFocused = focusZone === "content";
+	const contentFocused =
+		focusZone === "content" && !showHelp && !showProjectBrowser;
 
 	if (activeChat) {
 		return (
@@ -136,10 +149,12 @@ export function App({ onQuit }: AppProps) {
 					flexDirection="column"
 				>
 					<PlanView
+						key={`${projectDirectory ?? "default"}-${activeSessionId ?? "new"}`}
 						focused={contentFocused && activeTab === 0}
 						planData={planFiles.data}
 						daemonOnline={daemonOnline}
 						planInstance={planInstance}
+						activeSessionId={activeSessionId}
 					/>
 				</box>
 				<box
@@ -148,6 +163,7 @@ export function App({ onQuit }: AppProps) {
 					flexDirection="column"
 				>
 					<ExecuteView
+						key={projectDirectory ?? "default"}
 						focused={contentFocused && activeTab === 1}
 						planData={planFiles.data}
 						planInstance={planInstance}
@@ -167,6 +183,18 @@ export function App({ onQuit }: AppProps) {
 			</box>
 
 			{showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
+
+			{showProjectBrowser && (
+				<ProjectBrowser
+					onSelect={(instance, sessionId) => {
+						setShowProjectBrowser(false);
+						setProjectDirectory(instance.directory);
+						setActiveSessionId(sessionId);
+						setActiveTab(0);
+					}}
+					onClose={() => setShowProjectBrowser(false)}
+				/>
+			)}
 
 			<StatusBar activeTab={activeTab} planData={planFiles.data} />
 		</box>

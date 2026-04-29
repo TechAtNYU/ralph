@@ -7,9 +7,9 @@ interface StatusBarProps {
 }
 
 const HELP_BY_TAB: Record<number, string> = {
-	0: "Tab: tabs  Ctrl+S: spec  Ctrl+T: tasks  /: commands  ?: help",
-	1: "Tab: tabs  j/k: tasks  s: start/resume  p: pause  c: cancel  d: details  r: refresh  enter: chat  ?: help",
-	2: "Tab: tabs  ?: help",
+	0: "Tab: tabs  Ctrl+S: spec  Ctrl+T: tasks  /: commands  Ctrl+P: projects  ?: help",
+	1: "Tab: tabs  j/k: tasks  s: start/resume  p: pause  c: cancel  d: details  r: refresh  enter: chat  Ctrl+P: projects  ?: help",
+	2: "Tab: tabs  Ctrl+P: projects  ?: help",
 };
 
 function getTaskSummary(planData: PlanFilesData): string {
