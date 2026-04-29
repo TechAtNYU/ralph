@@ -233,6 +233,12 @@ export class DaemonClient {
 		>;
 	}
 
+	replyToQuestion(params: ParamsByMethod<"question.reply">) {
+		return send(this.socketPath, "question.reply", params) as Promise<
+			ResultByMethod<"question.reply">
+		>;
+	}
+
 	/**
 	 * Submit a job and stream events on the same socket. Eliminates the
 	 * race between separate submit + stream calls where deltas could be

@@ -66,6 +66,13 @@ type RawProviderModel = ProviderModel & {
 
 export interface OpencodeRuntimeClient {
 	session: OpencodeSessionClient;
+	question: {
+		reply(parameters: {
+			requestID: string;
+			directory?: string;
+			answers: Array<Array<string>>;
+		}): Promise<unknown>;
+	};
 	instance: {
 		dispose(parameters?: { directory?: string }): Promise<unknown>;
 	};
@@ -199,6 +206,12 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 						},
 						abort: (parameters) =>
 							client.session.abort(parameters, {
+								throwOnError: true,
+							}),
+					},
+					question: {
+						reply: (parameters) =>
+							client.question.reply(parameters, {
 								throwOnError: true,
 							}),
 					},

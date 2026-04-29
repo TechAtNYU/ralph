@@ -24,6 +24,8 @@ import {
 	type ManagedInstance,
 	normalizeIssues,
 	type ProviderListResult,
+	type QuestionInfo,
+	type QuestionReplyResult,
 	type RequestByMethod,
 	type RequestMessage,
 	RequestMessage as RequestMessageSchema,
@@ -247,6 +249,12 @@ export class Daemon {
 					);
 					this.resolveSessionIdle(sessionId);
 				}
+			} else if (event.type === "question.asked") {
+				this.routeQuestionToJob(instanceId, {
+					requestId: event.properties.id,
+					sessionId: event.properties.sessionID,
+					questions: event.properties.questions,
+				});
 			}
 		});
 		this.maxConcurrency =
@@ -314,6 +322,8 @@ export class Daemon {
 					return this.success(raw, this.handleJobStream(raw));
 				case "job.submit_and_stream":
 					return this.success(raw, await this.handleJobSubmitAndStream(raw));
+				case "question.reply":
+					return this.success(raw, await this.handleQuestionReply(raw));
 			}
 		} catch (error) {
 			return this.failure(raw.id, raw.method, this.toResponseError(error));
@@ -510,6 +520,27 @@ export class Daemon {
 		return { jobId: request.params.jobId };
 	}
 
+	private async handleQuestionReply(
+		request: RequestByMethod<"question.reply">,
+	): Promise<QuestionReplyResult> {
+		const instance = this.store.assertInstance(request.params.instanceId);
+		await this.startInstance(instance.id);
+		const runtime = this.registry.get(instance.id);
+		if (!runtime) {
+			throw new StoreError(
+				"instance_unavailable",
+				`instance ${instance.id} is unavailable`,
+			);
+		}
+
+		await runtime.client.question.reply({
+			requestID: request.params.requestId,
+			directory: instance.directory,
+			answers: request.params.answers,
+		});
+		return { ok: true };
+	}
+
 	private async handleJobCancel(
 		request: RequestByMethod<"job.cancel">,
 	): Promise<CancelResult> {
@@ -664,6 +695,28 @@ export class Daemon {
 				this.store.appendJobOutput(jobId, delta);
 			}
 			this.emitJobEvent(jobId, { type: "delta", jobId, field, delta });
+			return;
+		}
+	}
+
+	private routeQuestionToJob(
+		instanceId: string,
+		question: {
+			requestId: string;
+			sessionId: string;
+			questions: QuestionInfo[];
+		},
+	): void {
+		for (const [jobId, running] of this.runningJobs) {
+			if (running.instanceId !== instanceId) continue;
+			if (this.runningSessionIds.get(jobId) !== question.sessionId) continue;
+			this.emitJobEvent(jobId, {
+				type: "question",
+				jobId,
+				requestId: question.requestId,
+				sessionId: question.sessionId,
+				questions: question.questions,
+			});
 			return;
 		}
 	}
