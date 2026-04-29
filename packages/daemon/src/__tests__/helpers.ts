@@ -66,6 +66,12 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 		title?: string;
 	}> = [];
 	readonly abortCalls: Array<{ instanceId: string; sessionId: string }> = [];
+	readonly questionReplyCalls: Array<{
+		instanceId: string;
+		requestId: string;
+		directory?: string;
+		answers: Array<Array<string>>;
+	}> = [];
 	readonly directoriesStarted: string[] = [];
 	readonly disposeCalls: Array<{ directory?: string }> = [];
 	globalMaxConcurrent = 0;
@@ -189,6 +195,17 @@ export class FakeOpencodeRegistry implements OpencodeRuntimeManager {
 					},
 					abort: async ({ sessionID }) => {
 						this.abortCalls.push({ instanceId, sessionId: sessionID });
+						return undefined;
+					},
+				},
+				question: {
+					reply: async ({ requestID, directory, answers }) => {
+						this.questionReplyCalls.push({
+							instanceId,
+							requestId: requestID,
+							directory,
+							answers,
+						});
 						return undefined;
 					},
 				},
