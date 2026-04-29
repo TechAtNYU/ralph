@@ -55,6 +55,13 @@ export interface ProviderListResult {
 
 export interface OpencodeRuntimeClient {
 	session: OpencodeSessionClient;
+	question: {
+		reply(parameters: {
+			requestID: string;
+			directory?: string;
+			answers: Array<Array<string>>;
+		}): Promise<unknown>;
+	};
 	instance: {
 		dispose(parameters?: { directory?: string }): Promise<unknown>;
 	};
@@ -181,6 +188,12 @@ export class OpencodeRegistry implements OpencodeRuntimeManager {
 							});
 							return res as unknown as FileDiff[];
 						},
+					},
+					question: {
+						reply: (parameters) =>
+							client.question.reply(parameters, {
+								throwOnError: true,
+							}),
 					},
 					provider: {
 						list: async (parameters) => {

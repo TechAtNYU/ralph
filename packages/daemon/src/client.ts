@@ -233,6 +233,12 @@ export class DaemonClient {
 		>;
 	}
 
+	replyToQuestion(params: ParamsByMethod<"question.reply">) {
+		return send(this.socketPath, "question.reply", params) as Promise<
+			ResultByMethod<"question.reply">
+		>;
+	}
+
 	/**
 	 * Open a stream over the daemon socket and yield job events as they
 	 * arrive. The first line on the wire is the ack response (a normal

@@ -985,6 +985,85 @@ describe("Daemon streaming", () => {
 		expect(job.outputText).toBe("foo bar baz");
 	});
 
+	test("routes OpenCode question events to the matching job stream", async () => {
+		const { instanceId, jobId } = await createInstanceAndSubmit("needs input");
+		const events: Array<{ type: string; question?: string }> = [];
+		const unsub = daemon.subscribeJob(jobId, (event) => {
+			events.push(
+				event.type === "question"
+					? { type: event.type, question: event.questions[0]?.question }
+					: { type: event.type },
+			);
+		});
+
+		for (let i = 0; i < 20 && registry.promptCalls.length === 0; i += 1) {
+			await Bun.sleep(10);
+		}
+		const sessionId = registry.promptCalls[0]?.sessionId;
+		if (!sessionId) {
+			throw new Error("expected prompt call");
+		}
+
+		registry.emitEvent(instanceId, {
+			type: "question.asked",
+			properties: {
+				id: "question-1",
+				sessionID: sessionId,
+				questions: [
+					{
+						header: "Choice",
+						question: "Which path should I take?",
+						options: [
+							{ label: "A", description: "Use option A" },
+							{ label: "B", description: "Use option B" },
+						],
+					},
+				],
+			},
+		});
+
+		for (
+			let i = 0;
+			i < 20 && !events.some((event) => event.type === "question");
+			i += 1
+		) {
+			await Bun.sleep(10);
+		}
+		unsub();
+
+		expect(events).toContainEqual({
+			type: "question",
+			question: "Which path should I take?",
+		});
+	});
+
+	test("replies to OpenCode question requests through the runtime", async () => {
+		const { instanceId } = await createInstanceAndSubmit("needs answer");
+		for (let i = 0; i < 20 && registry.promptCalls.length === 0; i += 1) {
+			await Bun.sleep(10);
+		}
+
+		const response = await daemon.handleRequest(
+			req({
+				id: "question-reply",
+				method: "question.reply",
+				params: {
+					instanceId,
+					requestId: "question-1",
+					answers: [["A"]],
+				},
+			}),
+		);
+
+		expect(expectSuccess(response, "question.reply")).toEqual({ ok: true });
+		expect(registry.questionReplyCalls).toContainEqual({
+			instanceId,
+			requestId: "question-1",
+			directory: "/tmp/project-one",
+			answers: [["A"]],
+		});
+	});
+
 	test("executeJob preserves accumulated text rather than overwriting with parts", async () => {
 		registry.streamingDeltas = ["a", "b", "c"];
 		registry.deltaIntervalMs = 25;
